@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bürogummi Run – Office Dodger</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="hud">
+    <div class="brand">Bürogummi Run – Office Dodger</div>
+    <div class="status">
+      <span id="score">Score: 0</span>
+      <span id="lives">Leben: 3</span>
+      <span id="time">Zeit: 0s</span>
+      <span class="hint">Steuerung: A / D oder ← / →</span>
+    </div>
+  </div>
+  <div class="game-wrapper">
+    <canvas id="game" width="900" height="600" aria-label="Bürogummi Run Spielfeld"></canvas>
+    <div id="overlay" class="hidden">
+      <div class="panel">
+        <h1>Game Over</h1>
+        <p id="final-score">Score: 0</p>
+        <p id="final-time">Zeit: 0s</p>
+        <p class="cta">Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!</p>
+        <button id="restart">Nochmal laufen</button>
+      </div>
+    </div>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
