@@ -22,12 +22,40 @@ const projection = {
   laneBottomOffset: 150,
 };
 
-// Character palette
+// Charaktere mit eindeutigen Looks
 const characters = [
-  { name: "Lernende Verwaltung", body: "#22c55e", head: "#38bdf8", outline: "#0b1224" },
-  { name: "IT-Nerd", body: "#a855f7", head: "#7c3aed", outline: "#2e1065" },
-  { name: "Hauswart", body: "#fb923c", head: "#f97316", outline: "#7c2d12" },
-  { name: "Klassischer Bürogummi", body: "#94a3b8", head: "#cbd5e1", outline: "#0f172a" },
+  {
+    id: "leni",
+    label: "Leni – Lernende Verwaltung",
+    bodyColor: "#2dd4bf",
+    accentColor: "#a7f3d0",
+    headColor: "#e0f2fe",
+    outlineColor: "#0f172a",
+  },
+  {
+    id: "nico",
+    label: "Nico – IT-Nerd",
+    bodyColor: "#8b5cf6",
+    accentColor: "#7fff8f",
+    headColor: "#ede9fe",
+    outlineColor: "#1e1b4b",
+  },
+  {
+    id: "sam",
+    label: "Sam – Hauswart",
+    bodyColor: "#f97316",
+    accentColor: "#fed7aa",
+    headColor: "#ffedd5",
+    outlineColor: "#7c2d12",
+  },
+  {
+    id: "keller",
+    label: "Keller – Klassischer Bürogummi",
+    bodyColor: "#1d4ed8",
+    accentColor: "#e5e7eb",
+    headColor: "#e0f2fe",
+    outlineColor: "#0b1a3d",
+  },
 ];
 
 const player = {
@@ -45,6 +73,13 @@ let spawnTimer = 0;
 let running = true;
 let lastTime = performance.now();
 let currentCharacterIndex = 3;
+
+characterButtons.forEach((btn, index) => {
+  if (characters[index]) {
+    btn.textContent = characters[index].label;
+    btn.dataset.character = String(index);
+  }
+});
 
 const obstacleTypes = [
   { key: "chair", baseSize: 110, color: "#c084fc", label: "Bürostuhl" },
@@ -123,28 +158,94 @@ function drawRoad() {
 function drawPlayer() {
   const char = characters[currentCharacterIndex];
   const foot = projectToLane(player.lane, 1);
-  const bodyX = foot.x - player.width / 2;
-  const bodyY = foot.y - player.height;
+  const bodyWidth = player.width;
+  const bodyHeight = player.height - 26;
+  const headSize = 28;
+  const bodyX = foot.x - bodyWidth / 2;
+  const bodyY = foot.y - bodyHeight;
+  const headX = foot.x - headSize / 2;
+  const headY = bodyY - headSize + 8;
+
+  const drawHead = () => {
+    ctx.fillStyle = char.headColor;
+    ctx.strokeStyle = char.outlineColor;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.rect(headX, headY, headSize, headSize);
+    ctx.fill();
+    ctx.stroke();
+  };
 
   ctx.save();
-  ctx.shadowColor = `${char.body}66`;
+  ctx.shadowColor = `${char.bodyColor}66`;
   ctx.shadowBlur = 14;
-  ctx.fillStyle = char.body;
-  ctx.fillRect(bodyX, bodyY + 20, player.width, player.height - 20);
-  ctx.strokeStyle = char.outline;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(bodyX, bodyY + 20, player.width, player.height - 20);
 
-  ctx.beginPath();
-  ctx.fillStyle = char.head;
-  ctx.strokeStyle = char.outline;
-  ctx.lineWidth = 4;
-  ctx.arc(foot.x, bodyY + 14, 18, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  if (char.id === "leni") {
+    ctx.fillStyle = char.bodyColor;
+    ctx.strokeStyle = char.outlineColor;
+    ctx.lineWidth = 3.5;
+    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
+    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
 
-  ctx.fillStyle = char.outline;
-  ctx.fillRect(foot.x - 4, bodyY + 30, 8, player.height - 30);
+    ctx.fillStyle = char.accentColor;
+    ctx.fillRect(foot.x - bodyWidth * 0.2, bodyY + bodyHeight * 0.45, bodyWidth * 0.4, bodyHeight * 0.12);
+    drawHead();
+  } else if (char.id === "nico") {
+    ctx.fillStyle = char.bodyColor;
+    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
+
+    ctx.strokeStyle = char.accentColor;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(bodyX - 2, bodyY - 2, bodyWidth + 4, bodyHeight + 4);
+
+    ctx.fillStyle = "#c7f9cc";
+    ctx.fillRect(foot.x - bodyWidth * 0.2, bodyY + bodyHeight * 0.5, bodyWidth * 0.4, bodyHeight * 0.14);
+
+    ctx.strokeStyle = char.accentColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(foot.x, headY - 6, headSize * 0.65, Math.PI, 0);
+    ctx.stroke();
+    drawHead();
+  } else if (char.id === "sam") {
+    ctx.fillStyle = char.bodyColor;
+    ctx.strokeStyle = char.outlineColor;
+    ctx.lineWidth = 3.5;
+    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
+    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
+
+    ctx.fillStyle = char.accentColor;
+    ctx.fillRect(bodyX, bodyY + bodyHeight * 0.35, bodyWidth, bodyHeight * 0.08);
+    ctx.fillRect(bodyX, bodyY + bodyHeight * 0.6, bodyWidth, bodyHeight * 0.08);
+
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillRect(bodyX + bodyWidth - bodyWidth * 0.18, bodyY + bodyHeight * 0.5, bodyWidth * 0.12, bodyHeight * 0.12);
+    ctx.beginPath();
+    ctx.fillStyle = "#6b7280";
+    ctx.arc(bodyX + bodyWidth - bodyWidth * 0.12, bodyY + bodyHeight * 0.62, bodyWidth * 0.045, 0, Math.PI * 2);
+    ctx.fill();
+    drawHead();
+  } else {
+    ctx.fillStyle = char.bodyColor;
+    ctx.strokeStyle = char.outlineColor;
+    ctx.lineWidth = 3.5;
+    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
+    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
+
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight * 0.14);
+    ctx.strokeStyle = char.outlineColor;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(foot.x, bodyY + bodyHeight * 0.14);
+    ctx.lineTo(foot.x, bodyY + bodyHeight * 0.6);
+    ctx.stroke();
+
+    ctx.fillStyle = char.accentColor;
+    ctx.fillRect(bodyX + bodyWidth - bodyWidth * 0.18, bodyY + bodyHeight * 0.35, bodyWidth * 0.12, bodyHeight * 0.28);
+    drawHead();
+  }
+
   ctx.restore();
 }
 
