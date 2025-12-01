@@ -1,69 +1,58 @@
 'use strict';
 
-// DOM references
-const canvas = document.getElementById('game');
-const scoreEl = document.getElementById('score');
-const livesEl = document.getElementById('lives');
-const timeEl = document.getElementById('time');
-const overlayEl = document.getElementById('overlay');
-const startScreenEl = document.getElementById('start-screen');
-const finalScoreEl = document.getElementById('final-score');
-const finalTimeEl = document.getElementById('final-time');
-const ctaEl = document.querySelector('.cta');
-const restartBtn = document.getElementById('restart');
-const startBtn = document.getElementById('start');
-const characterButtons = Array.from(document.querySelectorAll('.character-select button'));
 const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
 // Character definitions for quick palette swaps
 const characters = [
-  {
-    label: 'Leni – Lernende Verwaltung',
-    bodyColor: '#39d6c8',
-    accentColor: '#b9fff6',
-    id: 'leni'
-  },
-  {
-    label: 'Nico – IT-Nerd',
-    bodyColor: '#6b21a8',
-    accentColor: '#7cff8c',
-    id: 'nico'
-  },
-  {
-    label: 'Sam – Hauswart',
-    bodyColor: '#f97316',
-    accentColor: '#ffb96b',
-    id: 'sam'
-  },
-  {
-    label: 'Keller – Klassischer Bürogummi',
-    bodyColor: '#1d4ed8',
-    accentColor: '#dbeafe',
-    id: 'keller'
-  }
+  { label: 'Leni – Lernende Verwaltung', bodyColor: '#39d6c8', accentColor: '#b9fff6', id: 'leni' },
+  { label: 'Nico – IT-Nerd', bodyColor: '#6b21a8', accentColor: '#7cff8c', id: 'nico' },
+  { label: 'Sam – Hauswart', bodyColor: '#f97316', accentColor: '#ffb96b', id: 'sam' },
+  { label: 'Keller – Klassischer Bürogummi', bodyColor: '#1d4ed8', accentColor: '#dbeafe', id: 'keller' }
 ];
 let currentCharacterIndex = 3;
 
+// DOM references
+let canvas;
+let scoreEl;
+let livesEl;
+let timeEl;
+let overlayEl;
+let startScreenEl;
+let finalScoreEl;
+let finalTimeEl;
+let ctaEl;
+let restartBtn;
+let startBtn;
+let characterButtons = [];
+
 // Three.js setup
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x050914);
-const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
-camera.position.set(0, 4, 8);
-camera.lookAt(new THREE.Vector3(0, 1, -10));
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+let scene;
+let camera;
+let renderer;
+let ambientLight;
+let dirLight;
 
-// Lighting placeholders (the lightweight renderer uses a fixed light, but we keep the objects for clarity)
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-dirLight.position.set(2, 6, 3);
-scene.add(ambientLight);
-scene.add(dirLight);
-
-// Lane and world layout
+// Game state
 const laneX = [-2.4, 0, 2.4];
 const laneWidth = 2.4;
 const corridorLength = 120;
+let player;
+let obstacles = [];
+let speed = 10;
+let lives = 3;
+let score = 0;
+let elapsed = 0;
+let playing = false;
+let lastTime = performance.now();
+let loopStarted = false;
+let sceneReady = false;
+let currentLaneIndex = 1;
+let targetLaneIndex = 1;
+const ctaMessages = [
+  'Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!',
+  'KV-Power gesucht! Spring bei der Gemeinde Freienbach vorbei.',
+  'Tempo liegt dir? Dann passt du perfekt in unser Verwaltungsteam.'
+];
 
 // Geometry helpers
 function createFloor() {
@@ -80,7 +69,6 @@ function createFloor() {
     stripe.position.set(i * laneWidth, 0.01, -corridorLength / 2);
     floor.add(stripe);
   }
-  // Wall hints
   for (let i = 0; i < corridorLength / 10; i++) {
     const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 10), new THREE.MeshStandardMaterial({ color: 0x0b1224 }));
     wallLeft.position.set(-laneWidth * 2, 1, -i * 10 - 5);
@@ -145,7 +133,7 @@ function createPlayer(character) {
   return group;
 }
 
-// Obstacle builders
+// Obstacles
 const obstacleTypes = [
   { key: 'chair', color: 0x7c3aed, size: [1, 1.4, 1] },
   { key: 'monitor', color: 0x38bdf8, size: [0.9, 1.1, 0.4] },
@@ -181,50 +169,6 @@ function buildObstacleMesh(typeKey) {
   return mesh;
 }
 
-// Game state
-let player = createPlayer(characters[currentCharacterIndex]);
-scene.add(player);
-let obstacles = [];
-let speed = 10;
-let lives = 3;
-let score = 0;
-let elapsed = 0;
-let playing = false;
-let lastTime = performance.now();
-let ctaMessages = [
-  'Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!',
-  'KV-Power gesucht! Spring bei der Gemeinde Freienbach vorbei.',
-  'Tempo liegt dir? Dann passt du perfekt in unser Verwaltungsteam.'
-];
-
-createFloor();
-setupCharacterButtons();
-spawnInitialObstacles();
-updateHud();
-
-function setupCharacterButtons() {
-  characterButtons.forEach((btn) => {
-    const idx = Number(btn.dataset.character);
-    btn.textContent = characters[idx].label;
-    btn.addEventListener('click', () => {
-      currentCharacterIndex = idx;
-      characterButtons.forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      swapPlayer();
-    });
-  });
-}
-
-function swapPlayer() {
-  scene.remove(player);
-  player = createPlayer(characters[currentCharacterIndex]);
-  player.position.x = laneX[currentLaneIndex];
-  scene.add(player);
-}
-
-let currentLaneIndex = 1;
-let targetLaneIndex = 1;
-
 function spawnInitialObstacles() {
   obstacles.forEach((o) => scene.remove(o.mesh));
   obstacles = [];
@@ -248,12 +192,15 @@ function resetGame() {
   speed = 10;
   currentLaneIndex = 1;
   targetLaneIndex = 1;
-  player.position.set(laneX[1], 0, 0);
+  if (player) {
+    player.position.set(laneX[1], 0, 0);
+  }
   spawnInitialObstacles();
   updateHud();
 }
 
 function updateHud() {
+  if (!scoreEl || !livesEl || !timeEl) return;
   scoreEl.textContent = `Score: ${Math.floor(score)}`;
   livesEl.textContent = `Leben: ${lives}`;
   timeEl.textContent = `Zeit: ${Math.floor(elapsed)}s`;
@@ -304,7 +251,7 @@ function checkCollision(a, b) {
   return dx < (sa.x + sb.x) * 0.5 && dy < (sa.y + sb.y) * 0.5 && dz < (sa.z + sb.z) * 0.5;
 }
 
-function onHit(obstacle) {
+function onHit() {
   lives -= 1;
   flashPlayer();
   if (lives <= 0) {
@@ -327,11 +274,15 @@ function triggerGameOver() {
 }
 
 function startGame() {
+  if (!sceneReady) {
+    initThree();
+  }
   overlayEl.classList.add('hidden');
   startScreenEl.classList.add('hidden');
   resetGame();
   playing = true;
   lastTime = performance.now();
+  ensureLoop();
 }
 
 function restartGame() {
@@ -339,6 +290,7 @@ function restartGame() {
   resetGame();
   playing = true;
   lastTime = performance.now();
+  ensureLoop();
 }
 
 function update(delta) {
@@ -359,6 +311,7 @@ function render() {
 }
 
 function loop() {
+  if (!sceneReady) return;
   const now = performance.now();
   const delta = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
@@ -368,29 +321,106 @@ function loop() {
 }
 
 // Input
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-    targetLaneIndex = Math.max(0, targetLaneIndex - 1);
-  }
-  if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-    targetLaneIndex = Math.min(2, targetLaneIndex + 1);
-  }
-});
+function bindInput() {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+      targetLaneIndex = Math.max(0, targetLaneIndex - 1);
+    }
+    if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+      targetLaneIndex = Math.min(2, targetLaneIndex + 1);
+    }
+  });
+}
 
-startBtn.addEventListener('click', startGame);
-restartBtn.addEventListener('click', restartGame);
+function setupCharacterButtons() {
+  characterButtons.forEach((btn) => {
+    const idx = Number(btn.dataset.character);
+    btn.textContent = characters[idx].label;
+    btn.addEventListener('click', () => {
+      currentCharacterIndex = idx;
+      characterButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      swapPlayer();
+    });
+  });
+}
 
-// Ensure responsive renderer sizing
+function swapPlayer() {
+  if (!sceneReady) return;
+  scene.remove(player);
+  player = createPlayer(characters[currentCharacterIndex]);
+  player.position.x = laneX[currentLaneIndex];
+  scene.add(player);
+}
+
+function initThree() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050914);
+  camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+  camera.position.set(0, 4, 8);
+  camera.lookAt(new THREE.Vector3(0, 1, -10));
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+
+  ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+  dirLight.position.set(2, 6, 3);
+  scene.add(ambientLight);
+  scene.add(dirLight);
+
+  createFloor();
+  player = createPlayer(characters[currentCharacterIndex]);
+  player.position.x = laneX[currentLaneIndex];
+  scene.add(player);
+  spawnInitialObstacles();
+  sceneReady = true;
+  resize();
+}
+
 function resize() {
+  if (!renderer || !camera || !canvas) return;
   const { clientWidth, clientHeight } = canvas;
   renderer.setSize(clientWidth, clientHeight);
   camera.aspect = clientWidth / clientHeight;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', resize);
-resize();
-requestAnimationFrame(loop);
 
-// Commentary: simple perspective projection is handled by the lightweight Three.js subset above
-// via a PerspectiveCamera and WebGLRenderer. Objects farther down -Z shrink naturally, giving a
-// readable third-person view while obstacles move towards the camera.
+function ensureLoop() {
+  if (!loopStarted) {
+    loopStarted = true;
+    requestAnimationFrame(loop);
+  }
+}
+
+function initDom() {
+  canvas = document.getElementById('game');
+  scoreEl = document.getElementById('score');
+  livesEl = document.getElementById('lives');
+  timeEl = document.getElementById('time');
+  overlayEl = document.getElementById('overlay');
+  startScreenEl = document.getElementById('start-screen');
+  finalScoreEl = document.getElementById('final-score');
+  finalTimeEl = document.getElementById('final-time');
+  ctaEl = document.querySelector('.cta');
+  restartBtn = document.getElementById('restart');
+  startBtn = document.getElementById('start-button');
+  characterButtons = Array.from(document.querySelectorAll('.character-select button'));
+
+  setupCharacterButtons();
+  bindInput();
+  updateHud();
+
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', restartGame);
+  window.addEventListener('resize', resize);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initDom();
+  initThree();
+  ensureLoop();
+});
+
+// Commentary: PerspectiveCamera + WebGLRenderer provide the pseudo-3D depth. Obstacles advance along -Z while the camera follows
+// the player laterally, giving a clear third-person lane view.
