@@ -30,6 +30,15 @@ const player = {
   lane: 0,
   width: 70,
   height: 110,
+
+const lanes = [-1, 0, 1];
+const laneWidth = 200;
+const player = {
+  lane: 0,
+  y: canvas.height - 120,
+  width: 80,
+  height: 120,
+  color: "#38bdf8",
 };
 
 let obstacles = [];
