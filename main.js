@@ -1,6 +1,8 @@
+"use strict";
+
+// DOM references
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-
 const scoreEl = document.getElementById("score");
 const livesEl = document.getElementById("lives");
 const timeEl = document.getElementById("time");
@@ -10,6 +12,7 @@ const finalTime = document.getElementById("final-time");
 const restartBtn = document.getElementById("restart");
 const characterButtons = document.querySelectorAll(".character-select button");
 
+// World description
 const lanes = [-1, 0, 1];
 const projection = {
   vanishingX: canvas.width / 2,
@@ -19,6 +22,7 @@ const projection = {
   laneBottomOffset: 150,
 };
 
+// Character palette
 const characters = [
   { name: "Lernende Verwaltung", body: "#22c55e", head: "#38bdf8", outline: "#0b1224" },
   { name: "IT-Nerd", body: "#a855f7", head: "#7c3aed", outline: "#2e1065" },
@@ -30,17 +34,9 @@ const player = {
   lane: 0,
   width: 70,
   height: 110,
-
-const lanes = [-1, 0, 1];
-const laneWidth = 200;
-const player = {
-  lane: 0,
-  y: canvas.height - 120,
-  width: 80,
-  height: 120,
-  color: "#38bdf8",
 };
 
+// Game state
 let obstacles = [];
 let lives = 3;
 let score = 0;
