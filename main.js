@@ -1,485 +1,396 @@
-"use strict";
+'use strict';
 
 // DOM references
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const scoreEl = document.getElementById("score");
-const livesEl = document.getElementById("lives");
-const timeEl = document.getElementById("time");
-const overlay = document.getElementById("overlay");
-const finalScore = document.getElementById("final-score");
-const finalTime = document.getElementById("final-time");
-const restartBtn = document.getElementById("restart");
-const characterButtons = document.querySelectorAll(".character-select button");
+const canvas = document.getElementById('game');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const timeEl = document.getElementById('time');
+const overlayEl = document.getElementById('overlay');
+const startScreenEl = document.getElementById('start-screen');
+const finalScoreEl = document.getElementById('final-score');
+const finalTimeEl = document.getElementById('final-time');
+const ctaEl = document.querySelector('.cta');
+const restartBtn = document.getElementById('restart');
+const startBtn = document.getElementById('start');
+const characterButtons = Array.from(document.querySelectorAll('.character-select button'));
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
 
-// World description
-const lanes = [-1, 0, 1];
-const projection = {
-  vanishingX: canvas.width / 2,
-  vanishingY: 70,
-  bottomY: canvas.height - 80,
-  laneTopOffset: 40,
-  laneBottomOffset: 150,
-};
-
-// Charaktere mit eindeutigen Looks
+// Character definitions for quick palette swaps
 const characters = [
   {
-    id: "leni",
-    label: "Leni – Lernende Verwaltung",
-    bodyColor: "#2dd4bf",
-    accentColor: "#a7f3d0",
-    headColor: "#e0f2fe",
-    outlineColor: "#0f172a",
+    label: 'Leni – Lernende Verwaltung',
+    bodyColor: '#39d6c8',
+    accentColor: '#b9fff6',
+    id: 'leni'
   },
   {
-    id: "nico",
-    label: "Nico – IT-Nerd",
-    bodyColor: "#8b5cf6",
-    accentColor: "#7fff8f",
-    headColor: "#ede9fe",
-    outlineColor: "#1e1b4b",
+    label: 'Nico – IT-Nerd',
+    bodyColor: '#6b21a8',
+    accentColor: '#7cff8c',
+    id: 'nico'
   },
   {
-    id: "sam",
-    label: "Sam – Hauswart",
-    bodyColor: "#f97316",
-    accentColor: "#fed7aa",
-    headColor: "#ffedd5",
-    outlineColor: "#7c2d12",
+    label: 'Sam – Hauswart',
+    bodyColor: '#f97316',
+    accentColor: '#ffb96b',
+    id: 'sam'
   },
   {
-    id: "keller",
-    label: "Keller – Klassischer Bürogummi",
-    bodyColor: "#1d4ed8",
-    accentColor: "#e5e7eb",
-    headColor: "#e0f2fe",
-    outlineColor: "#0b1a3d",
-  },
+    label: 'Keller – Klassischer Bürogummi',
+    bodyColor: '#1d4ed8',
+    accentColor: '#dbeafe',
+    id: 'keller'
+  }
 ];
-
-const player = {
-  lane: 0,
-  width: 70,
-  height: 110,
-};
-
-// Game state
-let obstacles = [];
-let lives = 3;
-let score = 0;
-let timeSurvived = 0;
-let spawnTimer = 0;
-let running = true;
-let lastTime = performance.now();
 let currentCharacterIndex = 3;
 
-characterButtons.forEach((btn, index) => {
-  if (characters[index]) {
-    btn.textContent = characters[index].label;
-    btn.dataset.character = String(index);
+// Three.js setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050914);
+const camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+camera.position.set(0, 4, 8);
+camera.lookAt(new THREE.Vector3(0, 1, -10));
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+// Lighting placeholders (the lightweight renderer uses a fixed light, but we keep the objects for clarity)
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight.position.set(2, 6, 3);
+scene.add(ambientLight);
+scene.add(dirLight);
+
+// Lane and world layout
+const laneX = [-2.4, 0, 2.4];
+const laneWidth = 2.4;
+const corridorLength = 120;
+
+// Geometry helpers
+function createFloor() {
+  const floor = new THREE.Group();
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x101827 });
+  const laneMaterial = new THREE.MeshStandardMaterial({ color: 0x1f2937 });
+  for (let i = 0; i < corridorLength / 6; i++) {
+    const section = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.2, 0.2, 6), floorMaterial);
+    section.position.set(0, -0.2, -i * 6);
+    floor.add(section);
   }
-});
-
-const obstacleTypes = [
-  { key: "chair", baseSize: 110, color: "#c084fc", label: "Bürostuhl" },
-  { key: "monitor", baseSize: 115, color: "#22c55e", label: "PC" },
-  { key: "lamp", baseSize: 105, color: "#fbbf24", label: "Lampe" },
-  { key: "folder", baseSize: 95, color: "#f97316", label: "Aktendossier" },
-  { key: "papers", baseSize: 90, color: "#e2e8f0", label: "Papierstapel" },
-];
-
-const eraser = { key: "eraser", baseSize: 120, color: "#ef4444", label: "Wotsch en Bürogummi si?" };
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
+  for (let i = -1; i <= 1; i++) {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, corridorLength), laneMaterial);
+    stripe.position.set(i * laneWidth, 0.01, -corridorLength / 2);
+    floor.add(stripe);
+  }
+  // Wall hints
+  for (let i = 0; i < corridorLength / 10; i++) {
+    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 10), new THREE.MeshStandardMaterial({ color: 0x0b1224 }));
+    wallLeft.position.set(-laneWidth * 2, 1, -i * 10 - 5);
+    const wallRight = wallLeft.clone();
+    wallRight.position.x = laneWidth * 2;
+    floor.add(wallLeft);
+    floor.add(wallRight);
+  }
+  scene.add(floor);
 }
 
-function projectToLane(lane, t) {
-  // Pseudo-3D: interpolate lane center and lane width between a top vanishing point and the bottom of the road.
-  // Each object stores a depth factor t (0 = weit oben/klein, 1 = beim Spieler/unten). We linearly blend position and scale to fake perspective.
-  const x = lerp(projection.vanishingX + projection.laneTopOffset * lane, projection.vanishingX + projection.laneBottomOffset * lane, t);
-  const y = lerp(projection.vanishingY, projection.bottomY, t);
-  const scale = lerp(0.32, 1.05, t);
-  return { x, y, scale };
+// Player avatar creation
+function createPlayer(character) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.4, 0.7), new THREE.MeshStandardMaterial({ color: character.bodyColor }));
+  body.position.y = 0.7;
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: character.accentColor }));
+  head.position.y = 1.4;
+
+  const detailMaterial = new THREE.MeshStandardMaterial({ color: character.accentColor });
+  if (character.id === 'leni') {
+    const folder = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.05), detailMaterial);
+    folder.position.set(0, 0.95, 0.38);
+    group.add(folder);
+  }
+  if (character.id === 'nico') {
+    body.material = new THREE.MeshStandardMaterial({ color: character.bodyColor });
+    const outline = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.45, 0.78), new THREE.MeshStandardMaterial({ color: character.accentColor }));
+    outline.position.y = 0.7;
+    group.add(outline);
+    const laptop = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.18, 0.05), detailMaterial);
+    laptop.position.set(0, 0.9, 0.4);
+    group.add(laptop);
+  }
+  if (character.id === 'sam') {
+    const stripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.72), detailMaterial);
+    stripe1.position.y = 0.95;
+    const stripe2 = stripe1.clone();
+    stripe2.position.y = 0.55;
+    group.add(stripe1);
+    group.add(stripe2);
+    const keys = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.25, 0.12), new THREE.MeshStandardMaterial({ color: 0xb0b5c2 }));
+    keys.position.set(-0.6, 0.6, 0.3);
+    group.add(keys);
+  }
+  if (character.id === 'keller') {
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.72), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    collar.position.y = 1.35;
+    group.add(collar);
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.05), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+    tie.position.set(0, 1, 0.35);
+    group.add(tie);
+    const folder = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.22), new THREE.MeshStandardMaterial({ color: 0x93c5fd }));
+    folder.position.set(0.62, 0.8, 0.15);
+    group.add(folder);
+  }
+
+  group.add(body);
+  group.add(head);
+  group.position.set(0, 0, 0);
+  group.userData.size = { x: 0.9, y: 1.6, z: 0.8 };
+  return group;
+}
+
+// Obstacle builders
+const obstacleTypes = [
+  { key: 'chair', color: 0x7c3aed, size: [1, 1.4, 1] },
+  { key: 'monitor', color: 0x38bdf8, size: [0.9, 1.1, 0.4] },
+  { key: 'folder', color: 0xfcd34d, size: [0.8, 1, 0.35] },
+  { key: 'paper', color: 0xe2e8f0, size: [1.2, 0.35, 0.9] },
+  { key: 'eraser', color: 0xef4444, size: [1.1, 0.55, 0.7] }
+];
+
+function buildObstacleMesh(typeKey) {
+  const config = obstacleTypes.find((o) => o.key === typeKey) || obstacleTypes[0];
+  const [w, h, d] = config.size;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: config.color }));
+  mesh.userData.size = { x: w, y: h, z: d };
+  mesh.userData.type = typeKey;
+  if (typeKey === 'chair') {
+    const back = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, h * 0.55, d * 0.2), new THREE.MeshStandardMaterial({ color: 0xa78bfa }));
+    back.position.set(0, h * 0.4, -d * 0.35);
+    mesh.add(back);
+  }
+  if (typeKey === 'monitor') {
+    const stand = new THREE.Mesh(new THREE.BoxGeometry(0.2, h * 0.6, 0.2), new THREE.MeshStandardMaterial({ color: 0x0ea5e9 }));
+    stand.position.set(0, -h * 0.2, 0);
+    mesh.add(stand);
+  }
+  if (typeKey === 'folder') {
+    mesh.rotation.y = -0.3;
+  }
+  if (typeKey === 'eraser') {
+    const label = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, h * 0.85, d * 1.02), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    label.position.set(0, 0, 0.001);
+    mesh.add(label);
+  }
+  return mesh;
+}
+
+// Game state
+let player = createPlayer(characters[currentCharacterIndex]);
+scene.add(player);
+let obstacles = [];
+let speed = 10;
+let lives = 3;
+let score = 0;
+let elapsed = 0;
+let playing = false;
+let lastTime = performance.now();
+let ctaMessages = [
+  'Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!',
+  'KV-Power gesucht! Spring bei der Gemeinde Freienbach vorbei.',
+  'Tempo liegt dir? Dann passt du perfekt in unser Verwaltungsteam.'
+];
+
+createFloor();
+setupCharacterButtons();
+spawnInitialObstacles();
+updateHud();
+
+function setupCharacterButtons() {
+  characterButtons.forEach((btn) => {
+    const idx = Number(btn.dataset.character);
+    btn.textContent = characters[idx].label;
+    btn.addEventListener('click', () => {
+      currentCharacterIndex = idx;
+      characterButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      swapPlayer();
+    });
+  });
+}
+
+function swapPlayer() {
+  scene.remove(player);
+  player = createPlayer(characters[currentCharacterIndex]);
+  player.position.x = laneX[currentLaneIndex];
+  scene.add(player);
+}
+
+let currentLaneIndex = 1;
+let targetLaneIndex = 1;
+
+function spawnInitialObstacles() {
+  obstacles.forEach((o) => scene.remove(o.mesh));
+  obstacles = [];
+  const laneTracker = [-40, -40, -40];
+  for (let i = 0; i < 18; i++) {
+    const lane = Math.floor(Math.random() * 3);
+    const z = laneTracker[lane] - (8 + Math.random() * 8);
+    laneTracker[lane] = z;
+    const type = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)].key;
+    const mesh = buildObstacleMesh(type);
+    mesh.position.set(laneX[lane], 0, z);
+    scene.add(mesh);
+    obstacles.push({ mesh, lane });
+  }
 }
 
 function resetGame() {
-  obstacles = [];
   lives = 3;
   score = 0;
-  timeSurvived = 0;
-  spawnTimer = 0;
-  running = true;
-  player.lane = 0;
+  elapsed = 0;
+  speed = 10;
+  currentLaneIndex = 1;
+  targetLaneIndex = 1;
+  player.position.set(laneX[1], 0, 0);
+  spawnInitialObstacles();
+  updateHud();
+}
+
+function updateHud() {
+  scoreEl.textContent = `Score: ${Math.floor(score)}`;
+  livesEl.textContent = `Leben: ${lives}`;
+  timeEl.textContent = `Zeit: ${Math.floor(elapsed)}s`;
+}
+
+function updatePlayer(delta) {
+  const currentX = player.position.x;
+  const targetX = laneX[targetLaneIndex];
+  const lerpFactor = clamp(delta * 10, 0, 1);
+  player.position.x = currentX + (targetX - currentX) * lerpFactor;
+}
+
+function updateObstacles(delta) {
+  const removeList = [];
+  obstacles.forEach((obs, index) => {
+    obs.mesh.position.z += speed * delta;
+    if (obs.mesh.position.z > 5) {
+      removeList.push(index);
+    }
+    if (checkCollision(player, obs.mesh)) {
+      onHit(obs);
+      removeList.push(index);
+    }
+  });
+  removeList.reverse().forEach((idx) => {
+    scene.remove(obstacles[idx].mesh);
+    obstacles.splice(idx, 1);
+  });
+  while (obstacles.length < 18) {
+    const lane = Math.floor(Math.random() * 3);
+    const farthestZ = obstacles.filter((o) => o.lane === lane).reduce((m, o) => Math.min(m, o.mesh.position.z), 10);
+    const spawnZ = Math.min(-30 - Math.random() * 20, farthestZ - 10);
+    const type = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)].key;
+    const mesh = buildObstacleMesh(type);
+    mesh.position.set(laneX[lane], 0, spawnZ);
+    scene.add(mesh);
+    obstacles.push({ mesh, lane });
+  }
+}
+
+function checkCollision(a, b) {
+  const sa = a.userData.size;
+  const sb = b.userData.size;
+  if (!sa || !sb) return false;
+  const dx = Math.abs(a.position.x - b.position.x);
+  const dy = Math.abs((a.position.y + sa.y * 0.5) - (b.position.y + sb.y * 0.5));
+  const dz = Math.abs(a.position.z - b.position.z);
+  return dx < (sa.x + sb.x) * 0.5 && dy < (sa.y + sb.y) * 0.5 && dz < (sa.z + sb.z) * 0.5;
+}
+
+function onHit(obstacle) {
+  lives -= 1;
+  flashPlayer();
+  if (lives <= 0) {
+    triggerGameOver();
+  }
+}
+
+function flashPlayer() {
+  player.scale.set(1.1, 1.1, 1.1);
+  setTimeout(() => player.scale.set(1, 1, 1), 120);
+}
+
+function triggerGameOver() {
+  playing = false;
+  overlayEl.classList.remove('hidden');
+  const cta = ctaMessages[Math.floor(Math.random() * ctaMessages.length)];
+  ctaEl.textContent = cta;
+  finalScoreEl.textContent = `Score: ${Math.floor(score)}`;
+  finalTimeEl.textContent = `Zeit: ${Math.floor(elapsed)}s`;
+}
+
+function startGame() {
+  overlayEl.classList.add('hidden');
+  startScreenEl.classList.add('hidden');
+  resetGame();
+  playing = true;
   lastTime = performance.now();
-  overlay.classList.add("hidden");
 }
 
-function drawRoad() {
-  ctx.save();
-  ctx.fillStyle = "#0b152c";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let i = 0; i < lanes.length; i++) {
-    const lane = lanes[i];
-    const topLeft = projectToLane(lane - 0.5, 0);
-    const topRight = projectToLane(lane + 0.5, 0);
-    const bottomLeft = projectToLane(lane - 0.5, 1);
-    const bottomRight = projectToLane(lane + 0.5, 1);
-
-    const gradient = ctx.createLinearGradient(0, topLeft.y, 0, bottomLeft.y);
-    gradient.addColorStop(0, "rgba(255,255,255,0.04)");
-    gradient.addColorStop(1, "rgba(255,255,255,0.02)");
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.moveTo(topLeft.x, topLeft.y);
-    ctx.lineTo(topRight.x, topRight.y);
-    ctx.lineTo(bottomRight.x, bottomRight.y);
-    ctx.lineTo(bottomLeft.x, bottomLeft.y);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.lineWidth = 2;
-  for (let i = -1; i <= 1; i++) {
-    const top = projectToLane(i, 0);
-    const bottom = projectToLane(i, 1);
-    ctx.beginPath();
-    ctx.moveTo(top.x, top.y);
-    ctx.lineTo(bottom.x, bottom.y);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawPlayer() {
-  const char = characters[currentCharacterIndex];
-  const foot = projectToLane(player.lane, 1);
-  const bodyWidth = player.width;
-  const bodyHeight = player.height - 26;
-  const headSize = 28;
-  const bodyX = foot.x - bodyWidth / 2;
-  const bodyY = foot.y - bodyHeight;
-  const headX = foot.x - headSize / 2;
-  const headY = bodyY - headSize + 8;
-
-  const drawHead = () => {
-    ctx.fillStyle = char.headColor;
-    ctx.strokeStyle = char.outlineColor;
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.rect(headX, headY, headSize, headSize);
-    ctx.fill();
-    ctx.stroke();
-  };
-
-  ctx.save();
-  ctx.shadowColor = `${char.bodyColor}66`;
-  ctx.shadowBlur = 14;
-
-  if (char.id === "leni") {
-    ctx.fillStyle = char.bodyColor;
-    ctx.strokeStyle = char.outlineColor;
-    ctx.lineWidth = 3.5;
-    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
-    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
-
-    ctx.fillStyle = char.accentColor;
-    ctx.fillRect(foot.x - bodyWidth * 0.2, bodyY + bodyHeight * 0.45, bodyWidth * 0.4, bodyHeight * 0.12);
-    drawHead();
-  } else if (char.id === "nico") {
-    ctx.fillStyle = char.bodyColor;
-    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
-
-    ctx.strokeStyle = char.accentColor;
-    ctx.lineWidth = 4;
-    ctx.strokeRect(bodyX - 2, bodyY - 2, bodyWidth + 4, bodyHeight + 4);
-
-    ctx.fillStyle = "#c7f9cc";
-    ctx.fillRect(foot.x - bodyWidth * 0.2, bodyY + bodyHeight * 0.5, bodyWidth * 0.4, bodyHeight * 0.14);
-
-    ctx.strokeStyle = char.accentColor;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(foot.x, headY - 6, headSize * 0.65, Math.PI, 0);
-    ctx.stroke();
-    drawHead();
-  } else if (char.id === "sam") {
-    ctx.fillStyle = char.bodyColor;
-    ctx.strokeStyle = char.outlineColor;
-    ctx.lineWidth = 3.5;
-    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
-    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
-
-    ctx.fillStyle = char.accentColor;
-    ctx.fillRect(bodyX, bodyY + bodyHeight * 0.35, bodyWidth, bodyHeight * 0.08);
-    ctx.fillRect(bodyX, bodyY + bodyHeight * 0.6, bodyWidth, bodyHeight * 0.08);
-
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillRect(bodyX + bodyWidth - bodyWidth * 0.18, bodyY + bodyHeight * 0.5, bodyWidth * 0.12, bodyHeight * 0.12);
-    ctx.beginPath();
-    ctx.fillStyle = "#6b7280";
-    ctx.arc(bodyX + bodyWidth - bodyWidth * 0.12, bodyY + bodyHeight * 0.62, bodyWidth * 0.045, 0, Math.PI * 2);
-    ctx.fill();
-    drawHead();
-  } else {
-    ctx.fillStyle = char.bodyColor;
-    ctx.strokeStyle = char.outlineColor;
-    ctx.lineWidth = 3.5;
-    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight);
-    ctx.strokeRect(bodyX, bodyY, bodyWidth, bodyHeight);
-
-    ctx.fillStyle = "#f8fafc";
-    ctx.fillRect(bodyX, bodyY, bodyWidth, bodyHeight * 0.14);
-    ctx.strokeStyle = char.outlineColor;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(foot.x, bodyY + bodyHeight * 0.14);
-    ctx.lineTo(foot.x, bodyY + bodyHeight * 0.6);
-    ctx.stroke();
-
-    ctx.fillStyle = char.accentColor;
-    ctx.fillRect(bodyX + bodyWidth - bodyWidth * 0.18, bodyY + bodyHeight * 0.35, bodyWidth * 0.12, bodyHeight * 0.28);
-    drawHead();
-  }
-
-  ctx.restore();
-}
-
-function drawChair(center, size, color) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fillRect(center.x - size * 0.25, center.y - size * 0.2, size * 0.5, size * 0.12);
-  ctx.fillRect(center.x - size * 0.2, center.y - size * 0.45, size * 0.4, size * 0.18);
-  ctx.fillRect(center.x - size * 0.04, center.y - size * 0.08, size * 0.08, size * 0.18);
-  ctx.beginPath();
-  ctx.moveTo(center.x - size * 0.18, center.y + size * 0.05);
-  ctx.lineTo(center.x + size * 0.18, center.y + size * 0.05);
-  ctx.lineTo(center.x + size * 0.28, center.y + size * 0.18);
-  ctx.lineTo(center.x - size * 0.28, center.y + size * 0.18);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawMonitor(center, size, color) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fillRect(center.x - size * 0.35, center.y - size * 0.4, size * 0.7, size * 0.45);
-  ctx.fillStyle = "#0b1224";
-  ctx.fillRect(center.x - size * 0.3, center.y - size * 0.35, size * 0.6, size * 0.35);
-  ctx.fillStyle = color;
-  ctx.fillRect(center.x - size * 0.06, center.y + size * 0.08, size * 0.12, size * 0.18);
-  ctx.fillRect(center.x - size * 0.18, center.y + size * 0.22, size * 0.36, size * 0.05);
-  ctx.restore();
-}
-
-function drawLamp(center, size, color) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fillRect(center.x - size * 0.05, center.y - size * 0.22, size * 0.1, size * 0.34);
-  ctx.beginPath();
-  ctx.moveTo(center.x - size * 0.2, center.y - size * 0.25);
-  ctx.lineTo(center.x + size * 0.2, center.y - size * 0.25);
-  ctx.lineTo(center.x, center.y - size * 0.5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillRect(center.x - size * 0.22, center.y + size * 0.16, size * 0.44, size * 0.08);
-  ctx.restore();
-}
-
-function drawFolder(center, size, color) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.fillRect(center.x - size * 0.28, center.y - size * 0.4, size * 0.56, size * 0.8);
-  ctx.fillStyle = "#fcd34d";
-  ctx.fillRect(center.x - size * 0.28, center.y - size * 0.4, size * 0.12, size * 0.8);
-  ctx.fillStyle = "rgba(0,0,0,0.15)";
-  ctx.fillRect(center.x - size * 0.1, center.y - size * 0.25, size * 0.24, size * 0.12);
-  ctx.restore();
-}
-
-function drawPapers(center, size) {
-  ctx.save();
-  ctx.fillStyle = "#e5e7eb";
-  for (let i = 0; i < 4; i++) {
-    ctx.fillRect(center.x - size * 0.25, center.y - size * 0.3 + i * size * 0.06, size * 0.5, size * 0.08);
-  }
-  ctx.strokeStyle = "#cbd5e1";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(center.x - size * 0.2, center.y - size * 0.28);
-  ctx.lineTo(center.x + size * 0.2, center.y - size * 0.28);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawEraser(center, size, color, label) {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.strokeStyle = "#7f1d1d";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(center.x - size * 0.4, center.y - size * 0.18);
-  ctx.lineTo(center.x + size * 0.42, center.y - size * 0.08);
-  ctx.lineTo(center.x + size * 0.4, center.y + size * 0.18);
-  ctx.lineTo(center.x - size * 0.42, center.y + size * 0.08);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = "#fef2f2";
-  ctx.font = `${Math.max(14, size / 8)}px Inter, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, center.x, center.y);
-  ctx.restore();
-}
-
-function drawObstacle(ob) {
-  const pos = projectToLane(ob.lane, ob.t);
-  const size = ob.baseSize * pos.scale;
-  const center = { x: pos.x, y: pos.y };
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.35)";
-  ctx.shadowBlur = 12;
-  switch (ob.key) {
-    case "chair":
-      drawChair(center, size, ob.color);
-      break;
-    case "monitor":
-      drawMonitor(center, size, ob.color);
-      break;
-    case "lamp":
-      drawLamp(center, size, ob.color);
-      break;
-    case "folder":
-      drawFolder(center, size, ob.color);
-      break;
-    case "papers":
-      drawPapers(center, size);
-      break;
-    case "eraser":
-      drawEraser(center, size, ob.color, ob.label);
-      break;
-  }
-  ctx.restore();
-}
-
-function spawnObstacle(delta) {
-  spawnTimer -= delta;
-  if (spawnTimer <= 0) {
-    const lane = lanes[Math.floor(Math.random() * lanes.length)];
-    const type = Math.random() < 0.2 ? eraser : obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
-    obstacles.push({
-      lane,
-      t: 0,
-      key: type.key,
-      baseSize: type.baseSize,
-      color: type.color,
-      label: type.label,
-      speed: 0.45 + Math.random() * 0.12,
-    });
-    spawnTimer = 550 + Math.random() * 380;
-  }
+function restartGame() {
+  overlayEl.classList.add('hidden');
+  resetGame();
+  playing = true;
+  lastTime = performance.now();
 }
 
 function update(delta) {
-  if (!running) return;
-
-  spawnObstacle(delta);
-  timeSurvived += delta / 1000;
-  score += delta * 0.08;
-
-  obstacles.forEach((ob) => {
-    ob.t += (ob.speed * delta) / 1000;
-  });
-
-  obstacles = obstacles.filter((ob) => ob.t < 1.12);
-
-  const playerFoot = projectToLane(player.lane, 1);
-  const playerBox = {
-    x: playerFoot.x - player.width * 0.45,
-    y: playerFoot.y - player.height,
-    width: player.width * 0.9,
-    height: player.height,
-  };
-
-  obstacles.forEach((ob) => {
-    if (ob.lane !== player.lane || ob.t < 0.7) return;
-    const pos = projectToLane(ob.lane, ob.t);
-    const size = ob.baseSize * pos.scale;
-    const box = {
-      x: pos.x - size * 0.45,
-      y: pos.y - size * 0.6,
-      width: size * 0.9,
-      height: size * 1.1,
-    };
-
-    const collide = box.x < playerBox.x + playerBox.width && box.x + box.width > playerBox.x && box.y < playerBox.y + playerBox.height && box.y + box.height > playerBox.y;
-
-    if (collide) {
-      lives -= 1;
-      ob.t = 2;
-      if (lives <= 0) {
-        running = false;
-        showGameOver();
-      }
-    }
-  });
-
-  scoreEl.textContent = `Score: ${Math.floor(score)}`;
-  livesEl.textContent = `Leben: ${lives}`;
-  timeEl.textContent = `Zeit: ${Math.floor(timeSurvived)}s`;
+  if (!playing) return;
+  elapsed += delta;
+  score += delta * 25;
+  speed += delta * 0.25;
+  const camTargetX = player.position.x * 0.35;
+  camera.position.x += (camTargetX - camera.position.x) * 0.08;
+  camera.lookAt(new THREE.Vector3(player.position.x, 1, -10));
+  updatePlayer(delta);
+  updateObstacles(delta);
+  updateHud();
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawRoad();
-  obstacles.slice().sort((a, b) => a.t - b.t).forEach(drawObstacle);
-  drawPlayer();
+function render() {
+  renderer.render(scene, camera);
 }
 
-function loop(now) {
-  const delta = now - lastTime;
+function loop() {
+  const now = performance.now();
+  const delta = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
   update(delta);
-  draw();
+  render();
   requestAnimationFrame(loop);
 }
 
-function changeLane(direction) {
-  if (!running) return;
-  const newLaneIndex = lanes.indexOf(player.lane) + direction;
-  if (newLaneIndex >= 0 && newLaneIndex < lanes.length) {
-    player.lane = lanes[newLaneIndex];
+// Input
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+    targetLaneIndex = Math.max(0, targetLaneIndex - 1);
   }
-}
-
-function showGameOver() {
-  finalScore.textContent = `Score: ${Math.floor(score)}`;
-  finalTime.textContent = `Zeit: ${Math.floor(timeSurvived)}s`;
-  overlay.classList.remove("hidden");
-}
-
-window.addEventListener("keydown", (e) => {
-  if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") changeLane(-1);
-  if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") changeLane(1);
+  if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+    targetLaneIndex = Math.min(2, targetLaneIndex + 1);
+  }
 });
 
-characterButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    characterButtons.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    currentCharacterIndex = Number(btn.dataset.character);
-  });
-});
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', restartGame);
 
-restartBtn.addEventListener("click", resetGame);
-
-resetGame();
+// Ensure responsive renderer sizing
+function resize() {
+  const { clientWidth, clientHeight } = canvas;
+  renderer.setSize(clientWidth, clientHeight);
+  camera.aspect = clientWidth / clientHeight;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
 requestAnimationFrame(loop);
 
+// Commentary: simple perspective projection is handled by the lightweight Three.js subset above
+// via a PerspectiveCamera and WebGLRenderer. Objects farther down -Z shrink naturally, giving a
+// readable third-person view while obstacles move towards the camera.

@@ -23,8 +23,15 @@
     <button data-character="3" class="active">Keller – Klassischer Bürogummi</button>
   </div>
   <div class="game-wrapper">
-    <canvas id="game" width="900" height="600" aria-label="Bürogummi Run Spielfeld"></canvas>
-    <div id="overlay" class="hidden">
+    <canvas id="game" width="1000" height="650" aria-label="Bürogummi Run Spielfeld"></canvas>
+    <div id="start-screen" class="overlay">
+      <div class="panel">
+        <h1>Bürogummi Run</h1>
+        <p>Weiche den Bürohindernissen aus, sammle Punkte und zeig, dass du Office-Dodger bist.</p>
+        <button id="start">Los geht's</button>
+      </div>
+    </div>
+    <div id="overlay" class="overlay hidden">
       <div class="panel">
         <h1>Game Over</h1>
         <p id="final-score">Score: 0</p>
@@ -34,6 +41,7 @@
       </div>
     </div>
   </div>
+  <script src="js/three.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
