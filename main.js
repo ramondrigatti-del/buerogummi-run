@@ -57,26 +57,40 @@ const ctaMessages = [
 // Geometry helpers
 function createFloor() {
   const floor = new THREE.Group();
-  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x101827 });
-  const laneMaterial = new THREE.MeshStandardMaterial({ color: 0x1f2937 });
-  for (let i = 0; i < corridorLength / 6; i++) {
-    const section = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.2, 0.2, 6), floorMaterial);
-    section.position.set(0, -0.2, -i * 6);
-    floor.add(section);
+  const corridorMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.1, roughness: 0.8 });
+  const laneMat = new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.05, roughness: 0.6 });
+  const stripeMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, emissive: 0x1f2937, emissiveIntensity: 0.4 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x070c18, roughness: 1 });
+
+  for (let i = 0; i < corridorLength / 8; i++) {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.2, 0.15, 8), corridorMat);
+    slab.position.set(0, -0.15, -i * 8);
+    floor.add(slab);
+
+    const laneBand = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.2, 0.02, 8), laneMat);
+    laneBand.position.set(0, 0.02, -i * 8 - 4);
+    floor.add(laneBand);
+
+    const divider = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.2, 0.01, 0.25), stripeMat);
+    divider.position.set(0, 0.025, -i * 8);
+    floor.add(divider);
   }
-  for (let i = -1; i <= 1; i++) {
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.01, corridorLength), laneMaterial);
-    stripe.position.set(i * laneWidth, 0.01, -corridorLength / 2);
+
+  for (let lane = -1; lane <= 1; lane++) {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, corridorLength), stripeMat);
+    stripe.position.set(lane * laneWidth, 0.05, -corridorLength / 2);
     floor.add(stripe);
   }
+
   for (let i = 0; i < corridorLength / 10; i++) {
-    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2, 10), new THREE.MeshStandardMaterial({ color: 0x0b1224 }));
-    wallLeft.position.set(-laneWidth * 2, 1, -i * 10 - 5);
+    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.4, 10), wallMat);
+    wallLeft.position.set(-laneWidth * 2, 1.2, -i * 10 - 5);
     const wallRight = wallLeft.clone();
     wallRight.position.x = laneWidth * 2;
     floor.add(wallLeft);
     floor.add(wallRight);
   }
+
   scene.add(floor);
 }
 
@@ -360,12 +374,15 @@ function initThree() {
   camera.position.set(0, 4, 8);
   camera.lookAt(new THREE.Vector3(0, 1, -10));
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  if (typeof renderer.setPixelRatio === 'function') {
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+  }
   renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
 
-  ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-  dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-  dirLight.position.set(2, 6, 3);
+  ambientLight = new THREE.AmbientLight(0xbcc3d1, 0.65);
+  dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  dirLight.position.set(3, 8, 4);
+  dirLight.castShadow = false;
   scene.add(ambientLight);
   scene.add(dirLight);
 
