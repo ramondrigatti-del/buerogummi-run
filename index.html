@@ -1,55 +1,73 @@
 <!doctype html>
 <html lang="de">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bürogummi Run – Office Dodger</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <div class="hud">
-    <div class="brand">
-      <div class="logo">
-        <img src="img/logo-freienbach.png" alt="Gemeinde Freienbach Logo" />
+  <head>
+    <meta charset="utf-8" />
+    <title>Bürogummi Run – Office Dodger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="hud">
+      <div class="brand">
+        <div class="logo">
+          <!-- Logo-Datei im Ordner img -->
+          <img src="img/logo-freienbach.png" alt="Gemeinde Freienbach Logo" />
+        </div>
+        <div class="brand-text">
+          <div class="title">BÜROGUMMI RUN – OFFICE DODGER</div>
+          <div class="subtitle">Gemeinde Freienbach</div>
+        </div>
       </div>
-      <div class="brand-text">
-        <div class="title">Bürogummi Run – Office Dodger</div>
-        <div class="subtitle">Gemeinde Freienbach</div>
+
+      <div class="status">
+        <span class="badge">
+          Score: <span id="score">0</span>
+        </span>
+        <span class="badge">
+          Leben: <span id="lives">3</span>
+        </span>
+        <span class="badge">
+          Zeit: <span id="time">0s</span>
+        </span>
+        <span class="badge">
+          Steuerung: A / D oder ← / →
+        </span>
+      </div>
+
+      <div class="character-select" aria-label="Charakterauswahl">
+        <button class="character-button active" data-character="0">
+          Leni – Lernende Verwaltung
+        </button>
+        <button class="character-button" data-character="1">
+          Nico – IT-Nerd
+        </button>
+        <button class="character-button" data-character="2">
+          Sam – Hauswart
+        </button>
+        <button class="character-button" data-character="3">
+          Keller – Klassischer Bürogummi
+        </button>
       </div>
     </div>
-    <div class="status">
-      <span id="score">Score: 0</span>
-      <span id="lives">Leben: 3</span>
-      <span id="time">Zeit: 0s</span>
-      <span class="hint">Steuerung: A / D oder ← / →</span>
-    </div>
-  </div>
-  <div class="character-select" aria-label="Charakterauswahl">
-    <button data-character="0">Leni – Lernende Verwaltung</button>
-    <button data-character="1">Nico – IT-Nerd</button>
-    <button data-character="2">Sam – Hauswart</button>
-    <button data-character="3" class="active">Keller – Klassischer Bürogummi</button>
-  </div>
-  <div class="game-wrapper">
-    <canvas id="game" width="1000" height="650" aria-label="Bürogummi Run Spielfeld"></canvas>
-    <div id="start-screen" class="overlay">
-      <div class="panel">
-        <h1>Bürogummi Run</h1>
-        <p>Weiche den Bürohindernissen aus, sammle Punkte und zeig, dass du Office-Dodger bist.</p>
-        <button id="start-button">Los geht's</button>
+
+    <div class="game-wrapper">
+      <canvas id="game" aria-label="Bürogummi Run Spielfeld"></canvas>
+
+      <div id="start-screen" class="overlay">
+        <div class="panel">
+          <h1>Bürogummi Run</h1>
+          <p>
+            Weiche den Bürohindernissen aus, sammle Punkte und zeig, dass du
+            der Office-Dodger bist.
+          </p>
+          <button id="start-button">Los geht's</button>
+        </div>
       </div>
     </div>
-    <div id="overlay" class="overlay hidden">
-      <div class="panel">
-        <h1>Game Over</h1>
-        <p id="final-score">Score: 0</p>
-        <p id="final-time">Zeit: 0s</p>
-        <p class="cta">Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!</p>
-        <button id="restart">Nochmal laufen</button>
-      </div>
-    </div>
-  </div>
-  <script src="js/three.min.js"></script>
-  <script src="main.js"></script>
-</body>
+
+    <!-- Three.js (muss in derselben Ebene liegen wie index.html) -->
+    <script src="three.min.js"></script>
+    <!-- Unser Spiel-Code -->
+    <script src="main.js"></script>
+  </body>
 </html>
