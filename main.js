@@ -100,8 +100,6 @@ for (let i = 0; i < corridorLength / 10; i++) {
   floor.add(wallLeft);
   floor.add(wallRight);
 }
-  }
-
   scene.add(floor);
 }
 
