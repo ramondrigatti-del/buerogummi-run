@@ -90,18 +90,20 @@ function buildCorridor() {
   }
 
   // Side walls
+  const wallGeo = new THREE.BoxGeometry(0.25, 3.2, 10);
+  const shelfGeo = new THREE.BoxGeometry(0.6, 2.6, 3);
   for (let i = 0; i < 12; i++) {
     const z = -i * 10 - 5;
-    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 3.2, 10), wallMat);
+    const wallLeft = new THREE.Mesh(wallGeo, wallMat);
     wallLeft.position.set(-laneWidth * 2, 1.6, z);
-    const wallRight = wallLeft.clone();
-    wallRight.position.x = laneWidth * 2;
+    const wallRight = new THREE.Mesh(wallGeo, wallMat);
+    wallRight.position.set(laneWidth * 2, 1.6, z);
     corridor.add(wallLeft, wallRight);
 
-    const shelfL = new THREE.Mesh(new THREE.BoxGeometry(0.6, 2.6, 3), shelfMat);
+    const shelfL = new THREE.Mesh(shelfGeo, shelfMat);
     shelfL.position.set(-laneWidth * 1.8, 1.3, z - 2);
-    const shelfR = shelfL.clone();
-    shelfR.position.x = laneWidth * 1.8;
+    const shelfR = new THREE.Mesh(shelfGeo, shelfMat);
+    shelfR.position.set(laneWidth * 1.8, 1.3, z - 2);
     corridor.add(shelfL, shelfR);
   }
 
