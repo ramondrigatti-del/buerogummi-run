@@ -1,18 +1,9 @@
-// Sehr vereinfachte, stabile Version von "Bürogummi Run – Office Dodger"
-// 3 Spuren, 3D-Look mit Three.js, Score/Leben/Zeit, Charakterwechsel
+// Bürogummi Run – einfache stabile 3D-Version mit Three.js
+// 3 Spuren, Hindernisse, Score/Leben/Zeit + Charakterauswahl
 
 (function () {
-  // ---------- DOM ----------
+  // ---------- DOM-Elemente ----------
   const canvas = document.getElementById("game");
-  if (!canvas) {
-    console.error("Canvas #game nicht gefunden.");
-    return;
-  }
-  if (typeof THREE === "undefined") {
-    console.error("THREE ist nicht geladen. three.min.js Pfad prüfen!");
-    return;
-  }
-
   const scoreEl = document.getElementById("score");
   const livesEl = document.getElementById("lives");
   const timeEl = document.getElementById("time");
@@ -20,12 +11,21 @@
   const startButton = document.getElementById("start-button");
   const characterButtons = document.querySelectorAll("[data-character]");
 
-  // ---------- Spielvariablen ----------
+  // Wenn das Canvas fehlt, macht der Rest keinen Sinn
+  if (!canvas) {
+    console.error("Canvas #game nicht gefunden – checke index.html");
+    return;
+  }
+
+  // ---------- Spielzustand ----------
   const laneWidth = 1.6;
   const lanesX = [-laneWidth, 0, laneWidth];
 
-  let scene, camera, renderer;
-  let player;
+  let scene = null;
+  let camera = null;
+  let renderer = null;
+  let player = null;
+
   let laneIndex = 1; // Mitte
   let obstacles = [];
 
@@ -37,22 +37,29 @@
   let loopStarted = false;
 
   const CHARACTERS = [
-    { body: 0x38bdf8, accent: 0xffffff },
-    { body: 0xfacc15, accent: 0x111827 },
-    { body: 0x4ade80, accent: 0x064e3b },
-    { body: 0x60a5fa, accent: 0x1e3a8a }
+    { body: 0x38bdf8, accent: 0xffffff }, // Leni
+    { body: 0xfacc15, accent: 0x111827 }, // Nico
+    { body: 0x4ade80, accent: 0x064e3b }, // Sam
+    { body: 0x60a5fa, accent: 0x1e3a8a }  // Keller
   ];
-  let currentCharacter = 3;
+  let currentCharacter = 0;
 
   // ---------- Initialisierung ----------
   function init() {
-    initThree();
     initUI();
+    initThree();
     updateHUD();
     startLoop();
   }
 
   function initThree() {
+    if (typeof THREE === "undefined") {
+      console.error(
+        "THREE ist nicht definiert. Ist three.min.js im gleichen Ordner wie index.html und vor main.js eingebunden?"
+      );
+      return; // UI funktioniert trotzdem, aber kein 3D-Spiel
+    }
+
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020617);
 
@@ -68,7 +75,7 @@
     scene.add(ambient);
 
     renderer = new THREE.WebGLRenderer({
-      canvas,
+      canvas: canvas,
       antialias: true
     });
     if (renderer.setPixelRatio) {
@@ -81,14 +88,14 @@
   }
 
   function buildTrack() {
-    // Boden
+    if (!scene || !THREE) return;
+
     const groundGeo = new THREE.BoxGeometry(6, 0.1, 60);
     const groundMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.position.set(0, -1, -20);
     scene.add(ground);
 
-    // Linien zwischen den Spuren
     const stripeGeo = new THREE.BoxGeometry(0.06, 0.02, 60);
     const stripeMat = new THREE.MeshBasicMaterial({ color: 0x1f2937 });
 
@@ -103,6 +110,8 @@
 
   // ---------- Spieler ----------
   function rebuildPlayer() {
+    if (!scene || typeof THREE === "undefined") return;
+
     if (player) {
       scene.remove(player);
       player = null;
@@ -145,7 +154,7 @@
   }
 
   function moveLeft() {
-    if (!running) return;
+    if (!running || !player) return;
     if (laneIndex > 0) {
       laneIndex--;
       player.position.x = lanesX[laneIndex];
@@ -153,7 +162,7 @@
   }
 
   function moveRight() {
-    if (!running) return;
+    if (!running || !player) return;
     if (laneIndex < 2) {
       laneIndex++;
       player.position.x = lanesX[laneIndex];
@@ -162,6 +171,8 @@
 
   // ---------- Hindernisse ----------
   function spawnObstacle() {
+    if (!scene || typeof THREE === "undefined") return;
+
     const lane = Math.floor(Math.random() * 3);
     const geo = new THREE.BoxGeometry(0.9, 0.8, 0.8);
     const mat = new THREE.MeshBasicMaterial({ color: 0x9ca3af });
@@ -177,15 +188,16 @@
       const o = obstacles[i];
       o.mesh.position.z += speed * dt;
 
+      // vorbei -> Punkte
       if (o.mesh.position.z > 3) {
-        scene.remove(o.mesh);
+        if (scene) scene.remove(o.mesh);
         obstacles.splice(i, 1);
-        score += 10; // knapp verpasst = Punkte
+        score += 10;
         continue;
       }
 
       if (checkHit(o.mesh)) {
-        scene.remove(o.mesh);
+        if (scene) scene.remove(o.mesh);
         obstacles.splice(i, 1);
         onHit();
       }
@@ -200,7 +212,9 @@
   }
 
   function clearObstacles() {
-    obstacles.forEach((o) => scene.remove(o.mesh));
+    obstacles.forEach((o) => {
+      if (scene) scene.remove(o.mesh);
+    });
     obstacles = [];
   }
 
@@ -222,6 +236,10 @@
   }
 
   function startGame() {
+    if (!scene || !renderer || typeof THREE === "undefined") {
+      console.error("Game kann nicht starten – Three.js nicht initialisiert.");
+      return;
+    }
     resetGame();
     running = true;
     lastTime = performance.now();
@@ -244,14 +262,16 @@
       const title = startScreen.querySelector("h1");
       if (title) title.textContent = "Game Over";
       const p = startScreen.querySelector("p");
-      if (p) p.textContent = `Du hast ${Math.floor(
-        score
-      )} Punkte erreicht. Nochmal?`;
+      if (p) {
+        p.textContent = `Du hast ${Math.floor(
+          score
+        )} Punkte erreicht. Nochmal?`;
+      }
       if (startButton) startButton.textContent = "Nochmal spielen";
     }
   }
 
-  // ---------- Loop ----------
+  // ---------- Haupt-Loop ----------
   function startLoop() {
     if (loopStarted) return;
     loopStarted = true;
@@ -264,7 +284,6 @@
 
     if (running) {
       elapsed += dt;
-      // alle ~0.9s Hindernis
       if (Math.random() < dt / 0.9) {
         spawnObstacle();
       }
@@ -275,13 +294,16 @@
     if (renderer && scene && camera) {
       renderer.render(scene, camera);
     }
+
     requestAnimationFrame(loop);
   }
 
-  // ---------- UI ----------
+  // ---------- UI / Events ----------
   function initUI() {
     if (startButton) {
-      startButton.addEventListener("click", startGame);
+      startButton.addEventListener("click", () => {
+        startGame();
+      });
     }
 
     characterButtons.forEach((btn) => {
@@ -299,9 +321,10 @@
       }
     });
 
+    // Default-Charakter aktivieren
     setCharacter(currentCharacter);
   }
 
-  // ---------- Start ----------
-  window.addEventListener("load", init);
+  // ---------- Start direkt nach Laden von main.js ----------
+  init();
 })();
