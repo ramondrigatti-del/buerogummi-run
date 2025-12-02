@@ -82,13 +82,24 @@ function createFloor() {
     floor.add(stripe);
   }
 
-  for (let i = 0; i < corridorLength / 10; i++) {
-    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.4, 10), wallMat);
-    wallLeft.position.set(-laneWidth * 2, 1.2, -i * 10 - 5);
-    const wallRight = wallLeft.clone();
-    wallRight.position.x = laneWidth * 2;
-    floor.add(wallLeft);
-    floor.add(wallRight);
+for (let i = 0; i < corridorLength / 10; i++) {
+  // linke Wand
+  const wallLeft = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 2.4, 10),
+    wallMat
+  );
+  wallLeft.position.set(-laneWidth * 2, 1.2, -i * 10 - 5);
+
+  // rechte Wand – eigene Mesh-Instanz (kein clone)
+  const wallRight = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 2.4, 10),
+    wallMat
+  );
+  wallRight.position.set(laneWidth * 2, 1.2, -i * 10 - 5);
+
+  floor.add(wallLeft);
+  floor.add(wallRight);
+}
   }
 
   scene.add(floor);
