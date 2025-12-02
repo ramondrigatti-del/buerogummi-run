@@ -1,493 +1,457 @@
-// main.js – 2D-Bürogummi-Runner mit Büro-Hintergrund & Büro-Obstacles
+'use strict';
 
-window.addEventListener("DOMContentLoaded", () => {
-  const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
+// Utility helpers
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+const randChoice = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-  const scoreEl = document.getElementById("score");
-  const livesEl = document.getElementById("lives");
-  const timeEl = document.getElementById("time");
-  const startScreen = document.getElementById("start-screen");
-  const gameOverScreen = document.getElementById("gameover-screen");
-  const startBtn = document.getElementById("start-button");
-  const restartBtn = document.getElementById("restart-button");
-  const finalScoreEl = document.getElementById("final-score");
-  const charButtons = document.querySelectorAll(".character-select button");
+// Character roster
+const characters = [
+  { id: 'leni', label: 'Leni – Lernende Verwaltung', body: '#2dd4bf', accent: '#b9fff6' },
+  { id: 'nico', label: 'Nico – IT-Nerd', body: '#7c3aed', accent: '#7cff8c' },
+  { id: 'sam', label: 'Sam – Hauswart', body: '#f97316', accent: '#ffcd86' },
+  { id: 'keller', label: 'Keller – Klassischer Bürogummi', body: '#1d4ed8', accent: '#e2e8f0' }
+];
+let currentCharacterIndex = 3;
 
-  if (!canvas || !ctx) {
-    console.error("Canvas nicht gefunden – prüfe index.html");
-    return;
+// DOM references
+let canvas;
+let scoreEl;
+let livesEl;
+let timeEl;
+let overlayEl;
+let startScreenEl;
+let finalScoreEl;
+let finalTimeEl;
+let ctaEl;
+let restartBtn;
+let startBtn;
+let characterButtons = [];
+
+// Three.js objects
+let scene;
+let camera;
+let renderer;
+let clock;
+let corridor;
+let player;
+let sceneReady = false;
+
+// Lighting
+let ambientLight;
+let dirLight;
+
+// Game state
+const lanePositions = [-2.4, 0, 2.4];
+const laneWidth = 2.4;
+const spawnRange = { min: -80, max: -40 };
+const maxObstacles = 18;
+let obstacles = [];
+let lastLaneSpawnZ = [spawnRange.max, spawnRange.max, spawnRange.max];
+let playing = false;
+let elapsed = 0;
+let score = 0;
+let lives = 3;
+let speed = 10;
+let targetLane = 1;
+let loopStarted = false;
+
+const ctaMessages = [
+  'Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!',
+  'KV-Power gesucht! Spring bei der Gemeinde Freienbach vorbei.',
+  'Tempo liegt dir? Dann passt du perfekt in unser Verwaltungsteam.'
+];
+
+// ---------- Scene construction ----------
+function buildCorridor() {
+  corridor = new THREE.Group();
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8, metalness: 0.05 });
+  const paperMat = new THREE.MeshStandardMaterial({ color: 0xcdd5e0, roughness: 0.6, metalness: 0.02 });
+  const stripeMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, emissive: 0x1f2937, emissiveIntensity: 0.35 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a1022, roughness: 1 });
+  const shelfMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.8 });
+
+  // Floor slabs with paper-like bands
+  for (let i = 0; i < 20; i++) {
+    const z = -i * 6;
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.4, 0.2, 6), floorMat);
+    slab.position.set(0, -0.2, z);
+    corridor.add(slab);
+
+    const paper = new THREE.Mesh(new THREE.BoxGeometry(laneWidth * 3.4, 0.06, 6), paperMat);
+    paper.position.set(0, 0, z - 3);
+    corridor.add(paper);
   }
 
-  const width = canvas.width;
-  const height = canvas.height;
-
-  // ---- Lanes ----------------------------------------------------
-  const laneCount = 3;
-  const lanePositions = [width * 0.25, width * 0.5, width * 0.75];
-  const laneWidth = width * 0.24;
-
-  // ---- Charaktere ----------------------------------------------
-  const CHARACTERS = [
-    { name: "Leni", bodyColor: "#7cf5ff", accentColor: "#ffffff" },
-    { name: "Nico", bodyColor: "#57ffb3", accentColor: "#021018" },
-    { name: "Sam", bodyColor: "#ffdd73", accentColor: "#3b2b00" },
-    { name: "Keller", bodyColor: "#ff7cc3", accentColor: "#2b0016" },
-  ];
-  let currentCharacterIndex = 0;
-
-  // ---- Büro-Hindernisse ----------------------------------------
-  const OBSTACLE_TYPES = [
-    {
-      key: "monitor",
-      width: 70,
-      height: 50,
-      color: "#1c2440",
-      detail: "#c8e0ff",
-    },
-    {
-      key: "chair",
-      width: 60,
-      height: 70,
-      color: "#222b46",
-      detail: "#4b5b9a",
-    },
-    {
-      key: "files",
-      width: 65,
-      height: 55,
-      color: "#2b324d",
-      detail: "#9ad0ff",
-    },
-    {
-      key: "coffee",
-      width: 45,
-      height: 50,
-      color: "#f5f5f5",
-      detail: "#c07b3f",
-    },
-  ];
-
-  // ---- Game State ----------------------------------------------
-  let laneIndex = 1; // 0 = links, 1 = mitte, 2 = rechts
-  const obstacles = [];
-  let running = false;
-  let lastTime = 0;
-  let obstacleTimer = 0;
-  let obstacleInterval = 1.0; // Sekunden
-  let speed = 260; // px / s
-  let score = 0;
-  let lives = 3;
-  let elapsedTime = 0;
-  let invulTime = 0;
-
-  function updateHUD() {
-    scoreEl.textContent = `Score: ${Math.floor(score)}`;
-    livesEl.textContent = `Leben: ${lives}`;
-    timeEl.textContent = `Zeit: ${Math.floor(elapsedTime)}s`;
+  // Lane separators
+  for (let lane = -1; lane <= 1; lane++) {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 120), stripeMat);
+    stripe.position.set(lane * laneWidth, 0.05, -60);
+    corridor.add(stripe);
   }
 
-  function resetGameState() {
-    laneIndex = 1;
-    obstacles.length = 0;
-    running = true;
-    lastTime = 0;
-    obstacleTimer = 0;
-    obstacleInterval = 1.0;
-    speed = 260;
-    score = 0;
-    lives = 3;
-    elapsedTime = 0;
-    invulTime = 0;
-    updateHUD();
+  // Side walls
+  for (let i = 0; i < 12; i++) {
+    const z = -i * 10 - 5;
+    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 3.2, 10), wallMat);
+    wallLeft.position.set(-laneWidth * 2, 1.6, z);
+    const wallRight = wallLeft.clone();
+    wallRight.position.x = laneWidth * 2;
+    corridor.add(wallLeft, wallRight);
+
+    const shelfL = new THREE.Mesh(new THREE.BoxGeometry(0.6, 2.6, 3), shelfMat);
+    shelfL.position.set(-laneWidth * 1.8, 1.3, z - 2);
+    const shelfR = shelfL.clone();
+    shelfR.position.x = laneWidth * 1.8;
+    corridor.add(shelfL, shelfR);
   }
 
-  function getLaneX(lane) {
-    return lanePositions[lane];
+  scene.add(corridor);
+}
+
+function buildPlayer(character) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: character.body });
+  const accentMat = new THREE.MeshStandardMaterial({ color: character.accent });
+
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(1, 0.7, 0.8), new THREE.MeshStandardMaterial({ color: 0x0b1224 }));
+  legs.position.y = 0.35;
+  group.add(legs);
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 0.9), bodyMat);
+  body.position.y = 1.3;
+  group.add(body);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 0.8), accentMat);
+  head.position.y = 2.1;
+  group.add(head);
+
+  // Character-specific accents
+  if (character.id === 'leni') {
+    const folder = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.08), accentMat);
+    folder.position.set(0.05, 1.35, 0.55);
+    group.add(folder);
+  } else if (character.id === 'nico') {
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(1.05, 1.6, 0.95), accentMat);
+    trim.position.y = 1.3;
+    group.add(trim);
+    const laptop = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.08), new THREE.MeshStandardMaterial({ color: 0xe0f2fe }));
+    laptop.position.set(0, 1.25, 0.55);
+    group.add(laptop);
+  } else if (character.id === 'sam') {
+    const stripe1 = new THREE.Mesh(new THREE.BoxGeometry(1, 0.08, 0.95), accentMat);
+    stripe1.position.y = 1.55;
+    const stripe2 = stripe1.clone();
+    stripe2.position.y = 1.1;
+    group.add(stripe1, stripe2);
+    const keys = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.25, 0.12), new THREE.MeshStandardMaterial({ color: 0xb0b5c2 }));
+    keys.position.set(-0.65, 1.1, 0.3);
+    group.add(keys);
+  } else if (character.id === 'keller') {
+    const collar = new THREE.Mesh(new THREE.BoxGeometry(1, 0.12, 0.95), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    collar.position.y = 2;
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.08), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+    tie.position.set(0, 1.65, 0.55);
+    const folder = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.55, 0.24), new THREE.MeshStandardMaterial({ color: 0x93c5fd }));
+    folder.position.set(0.68, 1.3, 0.2);
+    group.add(collar, tie, folder);
   }
 
-  function getPlayerRect() {
-    const w = 64;
-    const h = 86;
-    const x = getLaneX(laneIndex) - w / 2;
-    const y = height - h - 36;
-    return { x, y, width: w, height: h };
+  group.position.set(lanePositions[1], 0, 0);
+  group.userData.size = { x: 1, y: 2.6, z: 1 };
+  return group;
+}
+
+// ---------- Obstacles ----------
+const obstacleTypes = [
+  { key: 'paper', color: 0xe2e8f0, size: [1.5, 0.5, 1.2] },
+  { key: 'box', color: 0xa16207, size: [1.2, 1.2, 1.2] },
+  { key: 'drawer', color: 0x475569, size: [1.4, 1.1, 1.1] },
+  { key: 'printer', color: 0xcbd5e1, size: [1.6, 1.2, 1.1] },
+  { key: 'cup', color: 0xf59e0b, size: [0.7, 0.9, 0.7] },
+  { key: 'plant', color: 0x10b981, size: [1, 1.2, 1] },
+  { key: 'eraser', color: 0xef4444, size: [1.2, 0.6, 0.9] }
+];
+
+function createObstacleMesh(typeKey) {
+  const cfg = obstacleTypes.find((o) => o.key === typeKey) || obstacleTypes[0];
+  const [w, h, d] = cfg.size;
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: cfg.color }));
+  base.userData.size = { x: w, y: h, z: d };
+  base.userData.type = cfg.key;
+
+  // Add silhouettes for clarity
+  if (cfg.key === 'printer') {
+    const top = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, h * 0.35, d * 0.9), new THREE.MeshStandardMaterial({ color: 0xe5e7eb }));
+    top.position.y = h * 0.35;
+    base.add(top);
+  } else if (cfg.key === 'box') {
+    const tape = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, 0.05, d * 0.25), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    tape.position.y = h * 0.02;
+    base.add(tape);
+  } else if (cfg.key === 'drawer') {
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.04), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    handle.position.set(0, 0.15, d * 0.52);
+    base.add(handle);
+  } else if (cfg.key === 'cup') {
+    const steam = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    steam.position.set(0, h * 0.6, 0);
+    base.add(steam);
+  } else if (cfg.key === 'plant') {
+    const leaves = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, h * 0.5, d * 0.9), new THREE.MeshStandardMaterial({ color: 0x34d399 }));
+    leaves.position.y = h * 0.5;
+    base.add(leaves);
+  } else if (cfg.key === 'eraser') {
+    const label = new THREE.Mesh(new THREE.BoxGeometry(w * 0.95, h * 0.8, d * 1.02), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    label.position.set(0, 0, d * 0.01);
+    base.add(label);
   }
 
-  function getObstacleRect(o) {
-    const w = o.width;
-    const h = o.height;
-    const x = getLaneX(o.lane) - w / 2;
-    const y = o.y;
-    return { x, y, width: w, height: h };
+  return base;
+}
+
+function spawnObstacle() {
+  const lane = Math.floor(Math.random() * 3);
+  const minGap = 8;
+  const lastZ = lastLaneSpawnZ[lane];
+  const spawnZ = Math.min(spawnRange.min, lastZ - minGap - Math.random() * 6);
+  lastLaneSpawnZ[lane] = spawnZ;
+
+  const type = randChoice(obstacleTypes).key;
+  const mesh = createObstacleMesh(type);
+  mesh.position.set(lanePositions[lane], 0, spawnZ);
+  scene.add(mesh);
+  obstacles.push({ mesh, lane });
+}
+
+function spawnInitialObstacles() {
+  obstacles.forEach((o) => scene.remove(o.mesh));
+  obstacles = [];
+  lastLaneSpawnZ = [spawnRange.max, spawnRange.max, spawnRange.max];
+  for (let i = 0; i < maxObstacles; i++) {
+    spawnObstacle();
   }
+}
 
-  function rectsOverlap(a, b) {
-    return !(
-      a.x + a.width < b.x ||
-      a.x > b.x + b.width ||
-      a.y + a.height < b.y ||
-      a.y > b.y + b.height
-    );
+// ---------- Game flow ----------
+function resetGame() {
+  elapsed = 0;
+  score = 0;
+  lives = 3;
+  speed = 10;
+  targetLane = 1;
+  player.position.set(lanePositions[1], 0, 0);
+  spawnInitialObstacles();
+  updateHud();
+}
+
+function startGame() {
+  startScreenEl.classList.add('hidden');
+  overlayEl.classList.add('hidden');
+  resetGame();
+  playing = true;
+}
+
+function triggerGameOver() {
+  playing = false;
+  finalScoreEl.textContent = `Score: ${Math.floor(score)}`;
+  finalTimeEl.textContent = `Zeit: ${Math.floor(elapsed)}s`;
+  ctaEl.textContent = randChoice(ctaMessages);
+  overlayEl.classList.remove('hidden');
+}
+
+// ---------- Updates ----------
+function updateHud() {
+  if (!scoreEl || !livesEl || !timeEl) return;
+  scoreEl.textContent = `Score: ${Math.floor(score)}`;
+  livesEl.textContent = `Leben: ${lives}`;
+  timeEl.textContent = `Zeit: ${Math.floor(elapsed)}s`;
+}
+
+function updatePlayer(delta) {
+  const targetX = lanePositions[targetLane];
+  const lerp = clamp(delta * 9, 0, 1);
+  player.position.x = player.position.x + (targetX - player.position.x) * lerp;
+}
+
+function updateObstacles(delta) {
+  const removal = [];
+  obstacles.forEach((o, idx) => {
+    o.mesh.position.z += speed * delta;
+    if (o.mesh.position.z > 6) {
+      removal.push(idx);
+      score += 4; // knapp verpasst
+    }
+    if (checkCollision(player, o.mesh)) {
+      onCollision(idx, removal);
+    }
+  });
+  // remove from scene
+  removal.sort((a, b) => b - a).forEach((idx) => {
+    scene.remove(obstacles[idx].mesh);
+    obstacles.splice(idx, 1);
+  });
+  while (obstacles.length < maxObstacles) {
+    spawnObstacle();
   }
+}
 
-  function spawnObstacle() {
-    const lane = Math.floor(Math.random() * laneCount);
-    const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
+function checkCollision(a, b) {
+  if (!a || !b) return false;
+  const boxA = new THREE.Box3().setFromObject(a);
+  const boxB = new THREE.Box3().setFromObject(b);
+  return boxA.intersectsBox(boxB);
+}
 
-    obstacles.push({
-      lane,
-      y: -80,
-      width: type.width,
-      height: type.height,
-      type: type.key,
+function onCollision(idx, removalList) {
+  if (removalList.includes(idx)) return;
+  lives -= 1;
+  flashPlayer();
+  removalList.push(idx);
+  if (lives <= 0) {
+    triggerGameOver();
+  }
+}
+
+function flashPlayer() {
+  player.traverse((child) => {
+    if (child.material && child.material.color) {
+      child.material.emissive = new THREE.Color(0xfff1a8);
+    }
+  });
+  setTimeout(() => {
+    player.traverse((child) => {
+      if (child.material && child.material.emissive) {
+        child.material.emissive.setHex(0x000000);
+      }
     });
+  }, 120);
+}
+
+function update(delta) {
+  if (playing) {
+    elapsed += delta;
+    score += delta * 20;
+    speed += delta * 0.25;
+    updatePlayer(delta);
+    updateObstacles(delta);
   }
+  // Camera follows laterally
+  const targetCamX = player.position.x * 0.35;
+  camera.position.x += (targetCamX - camera.position.x) * 0.1;
+  camera.lookAt(new THREE.Vector3(player.position.x, 1.2, -12));
+  updateHud();
+}
 
-  function update(dt) {
-    if (!running) return;
+function animate() {
+  const delta = clock.getDelta();
+  update(delta);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
 
-    elapsedTime += dt;
-    score += dt * 60;
-    speed += dt * 6; // langsam schneller
-    obstacleTimer += dt;
+// ---------- Input ----------
+function handleLaneChange(dir) {
+  targetLane = clamp(targetLane + dir, 0, 2);
+}
 
-    if (obstacleTimer >= obstacleInterval) {
-      obstacleTimer = 0;
-      spawnObstacle();
-
-      // alle ~20s Spawns etwas dichter
-      if (obstacleInterval > 0.55 && elapsedTime % 20 < dt) {
-        obstacleInterval -= 0.05;
-      }
+function bindInput() {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') handleLaneChange(-1);
+    if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') handleLaneChange(1);
+    if ((e.key === ' ' || e.code === 'Space') && startScreenEl && !playing && startScreenEl.classList.contains('hidden') === false) {
+      startGame();
     }
+  });
+}
 
-    for (const o of obstacles) {
-      o.y += speed * dt;
-    }
-
-    // Offscreen-Obstacles entfernen
-    while (obstacles.length && obstacles[0].y > height + 80) {
-      obstacles.shift();
-    }
-
-    // Kollisionen
-    if (invulTime > 0) {
-      invulTime -= dt;
-    }
-
-    if (invulTime <= 0) {
-      const playerRect = getPlayerRect();
-      for (const o of obstacles) {
-        const oRect = getObstacleRect(o);
-        if (rectsOverlap(playerRect, oRect)) {
-          lives -= 1;
-          invulTime = 1.2; // 1.2s unverwundbar
-          if (lives <= 0) {
-            gameOver();
-          }
-          break;
-        }
-      }
-    }
-
-    updateHUD();
-  }
-
-  // --- Büro-Hintergrund zeichnen --------------------------------
-  function drawOfficeBackground() {
-    // Wand-Gradient
-    const wallGrad = ctx.createLinearGradient(0, 0, 0, height);
-    wallGrad.addColorStop(0, "#071021");
-    wallGrad.addColorStop(0.35, "#050a16");
-    wallGrad.addColorStop(1, "#02040b");
-    ctx.fillStyle = wallGrad;
-    ctx.fillRect(0, 0, width, height);
-
-    // Bodenlicht vorne
-    const floorGrad = ctx.createRadialGradient(
-      width / 2,
-      height * 0.95,
-      40,
-      width / 2,
-      height,
-      height * 0.7
-    );
-    floorGrad.addColorStop(0, "rgba(0, 215, 255, 0.35)");
-    floorGrad.addColorStop(1, "rgba(0, 215, 255, 0)");
-    ctx.fillStyle = floorGrad;
-    ctx.beginPath();
-    ctx.ellipse(width / 2, height * 0.98, width * 0.6, height * 0.25, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // dezente Schränke links / rechts
-    ctx.fillStyle = "rgba(8, 16, 40, 0.8)";
-    const cabinetW = 90;
-    const cabinetH = 220;
-    ctx.fillRect(32, height * 0.45, cabinetW, cabinetH);
-    ctx.fillRect(width - 32 - cabinetW, height * 0.45, cabinetW, cabinetH);
-
-    ctx.fillStyle = "rgba(35, 48, 90, 0.65)";
-    for (let i = 0; i < 4; i++) {
-      const y = height * 0.46 + i * 48;
-      ctx.fillRect(40, y, cabinetW - 16, 30);
-      ctx.fillRect(width - 40 - (cabinetW - 16), y, cabinetW - 16, 30);
-    }
-  }
-
-  // --- Lanes & Bodenzeichnen ------------------------------------
-  function drawLanes() {
-    for (let i = 0; i < laneCount; i++) {
-      const x = lanePositions[i] - laneWidth / 2;
-      const laneColor = i === 1 ? "#111a2f" : "#090f21";
-      ctx.fillStyle = laneColor;
-      ctx.fillRect(x, 60, laneWidth, height - 120);
-
-      // Leichte Rand-Beleuchtung
-      const edgeGrad = ctx.createLinearGradient(x, 0, x + laneWidth, 0);
-      edgeGrad.addColorStop(0, "rgba(0, 220, 255, 0.1)");
-      edgeGrad.addColorStop(0.5, "rgba(0, 220, 255, 0)");
-      edgeGrad.addColorStop(1, "rgba(0, 220, 255, 0.1)");
-      ctx.fillStyle = edgeGrad;
-      ctx.fillRect(x, 60, laneWidth, height - 120);
-
-      // „Teppich“-Muster / Hilfslinien (scrollen mit Zeit)
-      const offset = (elapsedTime * 120) % 40;
-      ctx.strokeStyle = "rgba(120, 153, 255, 0.18)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([]);
-      for (let y = 60 - offset; y < height - 60; y += 40) {
-        ctx.beginPath();
-        ctx.moveTo(x + laneWidth * 0.2, y);
-        ctx.lineTo(x + laneWidth * 0.8, y + 8);
-        ctx.stroke();
-      }
-
-      // Mittellinie leicht
-      ctx.strokeStyle = "rgba(170, 195, 255, 0.28)";
-      ctx.setLineDash([10, 14]);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(lanePositions[i], 70);
-      ctx.lineTo(lanePositions[i], height - 70);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-
-  // --- Obstacles zeichnen ---------------------------------------
-  function drawMonitor(r) {
-    ctx.fillStyle = "#111727";
-    ctx.fillRect(r.x, r.y, r.width, r.height);
-    ctx.fillStyle = "#c8e0ff";
-    ctx.fillRect(r.x + 6, r.y + 6, r.width - 12, r.height - 18);
-    ctx.fillStyle = "#111727";
-    ctx.fillRect(r.x + r.width * 0.35, r.y + r.height - 10, r.width * 0.3, 6);
-  }
-
-  function drawChair(r) {
-    ctx.fillStyle = "#222b46";
-    ctx.fillRect(r.x + 8, r.y + 14, r.width - 16, r.height - 24); // Lehne + Sitz
-    ctx.fillStyle = "#4b5b9a";
-    ctx.fillRect(r.x + 10, r.y + 18, r.width - 20, (r.height - 30) * 0.5);
-    ctx.fillRect(r.x + 10, r.y + (r.height - 30) * 0.5 + 18, r.width - 20, 10);
-    ctx.fillStyle = "#222b46";
-    ctx.fillRect(r.x + r.width / 2 - 4, r.y + r.height - 16, 8, 12);
-  }
-
-  function drawFiles(r) {
-    const count = 3;
-    const step = (r.width - 10) / count;
-    for (let i = 0; i < count; i++) {
-      const x = r.x + 5 + i * step;
-      ctx.fillStyle = i === 1 ? "#9ad0ff" : "#ffd48a";
-      ctx.fillRect(x, r.y + 8, step - 6, r.height - 16);
-      ctx.fillStyle = "rgba(0,0,0,0.15)";
-      ctx.fillRect(x + 4, r.y + 14, step - 14, 6);
-    }
-  }
-
-  function drawCoffee(r) {
-    ctx.fillStyle = "#f5f5f5";
-    ctx.fillRect(r.x + 8, r.y + 16, r.width - 16, r.height - 24);
-    ctx.strokeStyle = "#f5f5f5";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(r.x + r.width - 6, r.y + r.height * 0.5, 8, -Math.PI / 2, Math.PI / 2);
-    ctx.stroke();
-
-    ctx.fillStyle = "#c07b3f";
-    ctx.fillRect(r.x + 10, r.y + 18, r.width - 20, 10);
-
-    // kleiner Steam
-    ctx.strokeStyle = "rgba(255,255,255,0.7)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(r.x + r.width * 0.4, r.y + 10);
-    ctx.bezierCurveTo(
-      r.x + r.width * 0.35,
-      r.y,
-      r.x + r.width * 0.45,
-      r.y - 8,
-      r.x + r.width * 0.4,
-      r.y - 16
-    );
-    ctx.stroke();
-  }
-
-  function drawObstacle(o) {
-    const r = getObstacleRect(o);
-    const t = o.type;
-    if (t === "monitor") return drawMonitor(r);
-    if (t === "chair") return drawChair(r);
-    if (t === "files") return drawFiles(r);
-    if (t === "coffee") return drawCoffee(r);
-
-    // Fallback (sollte eigentlich nie passieren)
-    ctx.fillStyle = "#e5ecff";
-    ctx.fillRect(r.x, r.y, r.width, r.height);
-  }
-
-  // --- Player zeichnen ------------------------------------------
-  function drawPlayer() {
-    const p = getPlayerRect();
-    const char = CHARACTERS[currentCharacterIndex];
-
-    // Blinken bei Schaden
-    if (invulTime > 0 && Math.floor(invulTime * 10) % 2 === 0) {
-      return;
-    }
-
-    // Körper (Bürogummi)
-    ctx.fillStyle = char.bodyColor;
-    ctx.roundRect
-      ? ctx.roundRect(p.x, p.y, p.width, p.height, 12)
-      : ctx.fillRect(p.x, p.y, p.width, p.height);
-    if (!ctx.roundRect) ctx.fill();
-
-    // Kopf
-    const headH = p.height * 0.28;
-    const headY = p.y - headH + 10;
-    const headX = p.x + p.width * 0.2;
-    const headW = p.width * 0.6;
-
-    ctx.fillStyle = char.accentColor;
-    ctx.beginPath();
-    ctx.roundRect
-      ? ctx.roundRect(headX, headY, headW, headH, 10)
-      : ctx.rect(headX, headY, headW, headH);
-    ctx.fill();
-
-    // Gesicht
-    const eyeY = headY + headH * 0.45;
-    ctx.fillStyle = "#132034";
-    ctx.beginPath();
-    ctx.arc(headX + headW * 0.25, eyeY, 3, 0, Math.PI * 2);
-    ctx.arc(headX + headW * 0.75, eyeY, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Bauchstreifen / Badge
-    ctx.fillStyle = "rgba(0,0,0,0.16)";
-    ctx.fillRect(p.x + p.width * 0.22, p.y + p.height * 0.35, p.width * 0.56, 11);
-
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(p.x + p.width * 0.24, p.y + p.height * 0.36, 14, 9);
-
-    // Glow unter dem Player
-    const gradient = ctx.createRadialGradient(
-      p.x + p.width / 2,
-      p.y + p.height,
-      10,
-      p.x + p.width / 2,
-      p.y + p.height + 40,
-      80
-    );
-    gradient.addColorStop(0, "rgba(0, 209, 255, 0.7)");
-    gradient.addColorStop(1, "rgba(0, 209, 255, 0)");
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.ellipse(
-      p.x + p.width / 2,
-      p.y + p.height + 30,
-      64,
-      22,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
-  }
-
-  // --- Gesamtes Zeichnen ----------------------------------------
-  function draw() {
-    drawOfficeBackground();
-    drawLanes();
-
-    // Obstacles
-    for (const o of obstacles) {
-      drawObstacle(o);
-    }
-
-    // Player
-    drawPlayer();
-  }
-
-  // --- Game Loop -----------------------------------------------
-  function loop(timestamp) {
-    if (!lastTime) lastTime = timestamp;
-    const dt = (timestamp - lastTime) / 1000;
-    lastTime = timestamp;
-
-    if (running) {
-      update(dt);
-    }
-
-    draw();
-    requestAnimationFrame(loop);
-  }
-
-  function startGame() {
-    startScreen.classList.add("hidden");
-    gameOverScreen.classList.add("hidden");
-    resetGameState();
-  }
-
-  function gameOver() {
-    running = false;
-    finalScoreEl.textContent = Math.floor(score);
-    gameOverScreen.classList.remove("hidden");
-  }
-
-  // ---- Input ---------------------------------------------------
-
-  function handleKeyDown(event) {
-    const key = event.key;
-    if (key === "ArrowLeft" || key === "a" || key === "A") {
-      if (laneIndex > 0) laneIndex -= 1;
-    } else if (key === "ArrowRight" || key === "d" || key === "D") {
-      if (laneIndex < laneCount - 1) laneIndex += 1;
-    } else if (key === " " || key === "Enter") {
-      if (!running) startGame();
-    }
-  }
-
-  document.addEventListener("keydown", handleKeyDown);
-
-  // Charakter-Buttons
-  charButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      charButtons.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const idx = Number(btn.dataset.character);
-      if (!Number.isNaN(idx)) currentCharacterIndex = idx;
+function setupCharacterButtons() {
+  characterButtons.forEach((btn) => {
+    const idx = Number(btn.dataset.character);
+    btn.textContent = characters[idx].label;
+    btn.addEventListener('click', () => {
+      currentCharacterIndex = idx;
+      characterButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      swapPlayer();
     });
   });
+}
 
-  // Buttons
-  startBtn.addEventListener("click", startGame);
-  restartBtn.addEventListener("click", startGame);
+function swapPlayer() {
+  if (!scene || !player) return;
+  scene.remove(player);
+  player = buildPlayer(characters[currentCharacterIndex]);
+  player.position.x = lanePositions[targetLane];
+  scene.add(player);
+}
 
-  // Startzustand
-  updateHUD();
-  requestAnimationFrame(loop);
+// ---------- Initialisation ----------
+function initThree() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050914);
+
+  camera = new THREE.PerspectiveCamera(60, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+  camera.position.set(0, 4, 10);
+  camera.lookAt(new THREE.Vector3(0, 1.2, -12));
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  if (typeof renderer.setPixelRatio === 'function') {
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+  }
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+
+  ambientLight = new THREE.AmbientLight(0xbcc3d1, 0.7);
+  dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+  dirLight.position.set(4, 8, 6);
+  scene.add(ambientLight, dirLight);
+
+  buildCorridor();
+  player = buildPlayer(characters[currentCharacterIndex]);
+  scene.add(player);
+  spawnInitialObstacles();
+
+  clock = new THREE.Clock();
+  sceneReady = true;
+}
+
+function resize() {
+  if (!renderer || !camera || !canvas) return;
+  const { clientWidth, clientHeight } = canvas;
+  renderer.setSize(clientWidth, clientHeight, false);
+  camera.aspect = clientWidth / clientHeight;
+  camera.updateProjectionMatrix();
+}
+
+function initDom() {
+  canvas = document.getElementById('game');
+  scoreEl = document.getElementById('score');
+  livesEl = document.getElementById('lives');
+  timeEl = document.getElementById('time');
+  overlayEl = document.getElementById('overlay');
+  startScreenEl = document.getElementById('start-screen');
+  finalScoreEl = document.getElementById('final-score');
+  finalTimeEl = document.getElementById('final-time');
+  ctaEl = document.querySelector('.cta');
+  restartBtn = document.getElementById('restart');
+  startBtn = document.getElementById('start-button');
+  characterButtons = Array.from(document.querySelectorAll('.character-select button'));
+
+  setupCharacterButtons();
+  bindInput();
+  startBtn.addEventListener('click', startGame);
+  restartBtn.addEventListener('click', startGame);
+  window.addEventListener('resize', resize);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  initDom();
+  initThree();
+  if (!loopStarted) {
+    loopStarted = true;
+    animate();
+  }
+  updateHud();
 });
+
+// Hinweis: Klassische Three.js-Initialisierung ohne Module; die Szene rendert sofort,
+// die Logik (Spawns, Score, Timer) läuft nur, wenn playing=true nach Klick auf "Los geht's".
