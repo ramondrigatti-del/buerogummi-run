@@ -2,53 +2,77 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bürogummi Run – Office Dodger</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="hud">
+  <header class="hud">
     <div class="brand">
-      <div class="logo">
-        <img src="img/logo-freienbach.png" alt="Gemeinde Freienbach Logo" />
-      </div>
+      <img src="img/logo-freienbach.png" alt="Gemeinde Freienbach Logo" class="logo" />
       <div class="brand-text">
-        <div class="title">Bürogummi Run – Office Dodger</div>
+        <div class="title">BÜROGUMMI RUN – OFFICE DODGER</div>
         <div class="subtitle">Gemeinde Freienbach</div>
       </div>
     </div>
     <div class="status">
-      <span id="score">Score: 0</span>
-      <span id="lives">Leben: 3</span>
-      <span id="time">Zeit: 0s</span>
-      <span class="hint">Steuerung: A / D oder ← / →</span>
+      <div class="pill">Score: <span id="score">0</span></div>
+      <div class="pill">Leben: <span id="lives">3</span></div>
+      <div class="pill">Zeit: <span id="time">0s</span></div>
+      <div class="pill hint">Steuerung: A / D oder ← / →</div>
     </div>
-  </div>
-  <div class="character-select" aria-label="Charakterauswahl">
-    <button data-character="0">Leni – Lernende Verwaltung</button>
-    <button data-character="1">Nico – IT-Nerd</button>
-    <button data-character="2">Sam – Hauswart</button>
-    <button data-character="3" class="active">Keller – Klassischer Bürogummi</button>
-  </div>
-  <div class="game-wrapper">
-    <canvas id="game" width="1000" height="650" aria-label="Bürogummi Run Spielfeld"></canvas>
-    <div id="start-screen" class="overlay">
-      <div class="panel">
-        <h1>Bürogummi Run</h1>
-        <p>Weiche den Bürohindernissen aus, sammle Punkte und zeig, dass du Office-Dodger bist.</p>
-        <button id="start-button">Los geht's</button>
+  </header>
+
+  <main class="layout">
+    <div class="character-row">
+      <button class="char-button active" data-character="leni">
+        Leni – Lernende Verwaltung
+      </button>
+      <button class="char-button" data-character="nico">
+        Nico – IT-Nerd
+      </button>
+      <button class="char-button" data-character="sam">
+        Sam – Hauswart
+      </button>
+      <button class="char-button" data-character="keller">
+        Keller – Klassischer Bürogummi
+      </button>
+    </div>
+
+    <section class="game-wrapper">
+      <canvas
+        id="game"
+        width="900"
+        height="600"
+        aria-label="Bürogummi Run Spielfeld"
+      ></canvas>
+
+      <!-- Start-Screen -->
+      <div id="start-screen" class="overlay">
+        <div class="panel">
+          <h1>Bürogummi Run</h1>
+          <p>
+            Weiche den Bürohindernissen aus, sammle Punkte und zeig,
+            dass du der Office-Dodger bist.
+          </p>
+          <button id="start-button" class="primary">Los geht's</button>
+        </div>
       </div>
-    </div>
-    <div id="overlay" class="overlay hidden">
-      <div class="panel">
-        <h1>Game Over</h1>
-        <p id="final-score">Score: 0</p>
-        <p id="final-time">Zeit: 0s</p>
-        <p class="cta">Du wärst ein Top-Bürogummi – melde dich für eine Schnupperlehre bei der Gemeinde Freienbach!</p>
-        <button id="restart">Nochmal laufen</button>
+
+      <!-- Game-Over-Screen -->
+      <div id="game-over" class="overlay hidden">
+        <div class="panel">
+          <h2>Game Over</h2>
+          <p>Score: <span id="game-over-score">0</span></p>
+          <button id="restart-button" class="primary">
+            Nochmals spielen
+          </button>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
+  </main>
+
+  <!-- Three.js lokal -->
   <script src="js/three.min.js"></script>
   <script src="main.js"></script>
 </body>
