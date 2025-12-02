@@ -149,11 +149,15 @@ function createPlayer(character) {
     group.add(folder);
   }
 
-  group.add(body);
-  group.add(head);
-  group.position.set(0, 0, 0);
-  group.userData.size = { x: 0.9, y: 1.6, z: 0.8 };
-  return group;
+ group.add(body);
+group.add(head);
+group.position.set(0, 0, 0);
+
+// userData sicher initialisiere
+group.userData = group.userData || {};
+group.userData.size = { x: 0.9, y: 1.6, z: 0.8 };
+
+return group;
 }
 
 // Obstacles
