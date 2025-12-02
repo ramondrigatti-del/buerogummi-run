@@ -1,330 +1,304 @@
-// Bürogummi Run – einfache stabile 3D-Version mit Three.js
-// 3 Spuren, Hindernisse, Score/Leben/Zeit + Charakterauswahl
-
-(function () {
-  // ---------- DOM-Elemente ----------
+window.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
   const scoreEl = document.getElementById("score");
   const livesEl = document.getElementById("lives");
   const timeEl = document.getElementById("time");
   const startScreen = document.getElementById("start-screen");
-  const startButton = document.getElementById("start-button");
-  const characterButtons = document.querySelectorAll("[data-character]");
+  const gameOverScreen = document.getElementById("gameover-screen");
+  const startBtn = document.getElementById("start-button");
+  const restartBtn = document.getElementById("restart-button");
+  const finalScoreEl = document.getElementById("final-score");
+  const charButtons = document.querySelectorAll(".character-select button");
 
-  // Wenn das Canvas fehlt, macht der Rest keinen Sinn
-  if (!canvas) {
-    console.error("Canvas #game nicht gefunden – checke index.html");
+  if (!canvas || !ctx) {
+    console.error("Canvas nicht gefunden – prüfe index.html");
     return;
   }
 
-  // ---------- Spielzustand ----------
-  const laneWidth = 1.6;
-  const lanesX = [-laneWidth, 0, laneWidth];
+  const width = canvas.width;
+  const height = canvas.height;
 
-  let scene = null;
-  let camera = null;
-  let renderer = null;
-  let player = null;
+  // ---- Lanes ----------------------------------------------------
+  const laneCount = 3;
+  const lanePositions = [width * 0.25, width * 0.5, width * 0.75];
+  const laneWidth = width * 0.22;
 
-  let laneIndex = 1; // Mitte
-  let obstacles = [];
+  // ---- Charaktere ----------------------------------------------
+  const CHARACTERS = [
+    { name: "Leni", bodyColor: "#7cf5ff", accentColor: "#ffffff" },
+    { name: "Nico", bodyColor: "#57ffb3", accentColor: "#021018" },
+    { name: "Sam", bodyColor: "#ffdd73", accentColor: "#3b2b00" },
+    { name: "Keller", bodyColor: "#ff7cc3", accentColor: "#2b0016" },
+  ];
+  let currentCharacterIndex = 0;
 
+  // ---- Game State ----------------------------------------------
+  let laneIndex = 1; // 0 = links, 1 = mitte, 2 = rechts
+  const obstacles = [];
   let running = false;
+  let lastTime = 0;
+  let obstacleTimer = 0;
+  let obstacleInterval = 1.0; // Sekunden
+  let speed = 260; // px / s
   let score = 0;
   let lives = 3;
-  let elapsed = 0;
-  let lastTime = performance.now();
-  let loopStarted = false;
+  let elapsedTime = 0;
+  let invulTime = 0;
 
-  const CHARACTERS = [
-    { body: 0x38bdf8, accent: 0xffffff }, // Leni
-    { body: 0xfacc15, accent: 0x111827 }, // Nico
-    { body: 0x4ade80, accent: 0x064e3b }, // Sam
-    { body: 0x60a5fa, accent: 0x1e3a8a }  // Keller
-  ];
-  let currentCharacter = 0;
-
-  // ---------- Initialisierung ----------
-  function init() {
-    initUI();
-    initThree();
-    updateHUD();
-    startLoop();
-  }
-
-  function initThree() {
-    if (typeof THREE === "undefined") {
-      console.error(
-        "THREE ist nicht definiert. Ist three.min.js im gleichen Ordner wie index.html und vor main.js eingebunden?"
-      );
-      return; // UI funktioniert trotzdem, aber kein 3D-Spiel
-    }
-
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x020617);
-
-    const width = canvas.clientWidth || 900;
-    const height = canvas.clientHeight || 600;
-
-    camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 100);
-    camera.position.set(0, 2.8, 7);
-    camera.lookAt(0, 1.2, -10);
-    scene.add(camera);
-
-    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(ambient);
-
-    renderer = new THREE.WebGLRenderer({
-      canvas: canvas,
-      antialias: true
-    });
-    if (renderer.setPixelRatio) {
-      renderer.setPixelRatio(window.devicePixelRatio || 1);
-    }
-    renderer.setSize(width, height, false);
-
-    buildTrack();
-    rebuildPlayer();
-  }
-
-  function buildTrack() {
-    if (!scene || !THREE) return;
-
-    const groundGeo = new THREE.BoxGeometry(6, 0.1, 60);
-    const groundMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.position.set(0, -1, -20);
-    scene.add(ground);
-
-    const stripeGeo = new THREE.BoxGeometry(0.06, 0.02, 60);
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0x1f2937 });
-
-    const stripeLeft = new THREE.Mesh(stripeGeo, stripeMat);
-    stripeLeft.position.set(-laneWidth, -0.95, -20);
-    scene.add(stripeLeft);
-
-    const stripeRight = new THREE.Mesh(stripeGeo, stripeMat);
-    stripeRight.position.set(laneWidth, -0.95, -20);
-    scene.add(stripeRight);
-  }
-
-  // ---------- Spieler ----------
-  function rebuildPlayer() {
-    if (!scene || typeof THREE === "undefined") return;
-
-    if (player) {
-      scene.remove(player);
-      player = null;
-    }
-
-    const cfg = CHARACTERS[currentCharacter] || CHARACTERS[0];
-
-    const group = new THREE.Group();
-
-    const bodyGeo = new THREE.BoxGeometry(0.9, 1.2, 0.6);
-    const bodyMat = new THREE.MeshBasicMaterial({ color: cfg.body });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.set(0, 0.6, 0);
-    group.add(body);
-
-    const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-    const headMat = new THREE.MeshBasicMaterial({ color: cfg.accent });
-    const head = new THREE.Mesh(headGeo, headMat);
-    head.position.set(0, 1.25, 0);
-    group.add(head);
-
-    const baseGeo = new THREE.BoxGeometry(1.1, 0.1, 0.8);
-    const baseMat = new THREE.MeshBasicMaterial({ color: 0x0ea5e9 });
-    const base = new THREE.Mesh(baseGeo, baseMat);
-    base.position.set(0, -0.05, 0);
-    group.add(base);
-
-    group.position.set(lanesX[laneIndex], 0, 0);
-    player = group;
-    scene.add(player);
-  }
-
-  function setCharacter(index) {
-    if (index < 0 || index >= CHARACTERS.length) return;
-    currentCharacter = index;
-    characterButtons.forEach((b) => b.classList.remove("active"));
-    const btn = document.querySelector(`[data-character="${index}"]`);
-    if (btn) btn.classList.add("active");
-    rebuildPlayer();
-  }
-
-  function moveLeft() {
-    if (!running || !player) return;
-    if (laneIndex > 0) {
-      laneIndex--;
-      player.position.x = lanesX[laneIndex];
-    }
-  }
-
-  function moveRight() {
-    if (!running || !player) return;
-    if (laneIndex < 2) {
-      laneIndex++;
-      player.position.x = lanesX[laneIndex];
-    }
-  }
-
-  // ---------- Hindernisse ----------
-  function spawnObstacle() {
-    if (!scene || typeof THREE === "undefined") return;
-
-    const lane = Math.floor(Math.random() * 3);
-    const geo = new THREE.BoxGeometry(0.9, 0.8, 0.8);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x9ca3af });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(lanesX[lane], -0.6, -40);
-    scene.add(mesh);
-    obstacles.push({ mesh, lane });
-  }
-
-  function updateObstacles(dt) {
-    const speed = 13;
-    for (let i = obstacles.length - 1; i >= 0; i--) {
-      const o = obstacles[i];
-      o.mesh.position.z += speed * dt;
-
-      // vorbei -> Punkte
-      if (o.mesh.position.z > 3) {
-        if (scene) scene.remove(o.mesh);
-        obstacles.splice(i, 1);
-        score += 10;
-        continue;
-      }
-
-      if (checkHit(o.mesh)) {
-        if (scene) scene.remove(o.mesh);
-        obstacles.splice(i, 1);
-        onHit();
-      }
-    }
-  }
-
-  function checkHit(ob) {
-    if (!player) return false;
-    const dx = Math.abs(ob.position.x - player.position.x);
-    const dz = Math.abs(ob.position.z - player.position.z);
-    return dx < laneWidth * 0.5 && dz < 0.8;
-  }
-
-  function clearObstacles() {
-    obstacles.forEach((o) => {
-      if (scene) scene.remove(o.mesh);
-    });
-    obstacles = [];
-  }
-
-  // ---------- HUD & Game State ----------
   function updateHUD() {
-    if (scoreEl) scoreEl.textContent = String(Math.floor(score));
-    if (livesEl) livesEl.textContent = String(lives);
-    if (timeEl) timeEl.textContent = `${Math.floor(elapsed)}s`;
+    scoreEl.textContent = `Score: ${Math.floor(score)}`;
+    livesEl.textContent = `Leben: ${lives}`;
+    timeEl.textContent = `Zeit: ${Math.floor(elapsedTime)}s`;
   }
 
-  function resetGame() {
+  function resetGameState() {
+    laneIndex = 1;
+    obstacles.length = 0;
+    running = true;
+    lastTime = 0;
+    obstacleTimer = 0;
+    obstacleInterval = 1.0;
+    speed = 260;
     score = 0;
     lives = 3;
-    elapsed = 0;
-    laneIndex = 1;
-    if (player) player.position.x = lanesX[laneIndex];
-    clearObstacles();
+    elapsedTime = 0;
+    invulTime = 0;
     updateHUD();
+  }
+
+  function getLaneX(lane) {
+    return lanePositions[lane];
+  }
+
+  function getPlayerRect() {
+    const w = 60;
+    const h = 80;
+    const x = getLaneX(laneIndex) - w / 2;
+    const y = height - h - 30;
+    return { x, y, width: w, height: h };
+  }
+
+  function getObstacleRect(o) {
+    const w = o.width;
+    const h = o.height;
+    const x = getLaneX(o.lane) - w / 2;
+    const y = o.y;
+    return { x, y, width: w, height: h };
+  }
+
+  function rectsOverlap(a, b) {
+    return !(
+      a.x + a.width < b.x ||
+      a.x > b.x + b.width ||
+      a.y + a.height < b.y ||
+      a.y > b.y + b.height
+    );
+  }
+
+  function spawnObstacle() {
+    const lane = Math.floor(Math.random() * laneCount);
+    obstacles.push({
+      lane,
+      y: -40,
+      width: 60,
+      height: 40,
+    });
+  }
+
+  function update(dt) {
+    if (!running) return;
+
+    elapsedTime += dt;
+    score += dt * 50;
+    speed += dt * 5; // langsam schneller
+    obstacleTimer += dt;
+
+    if (obstacleTimer >= obstacleInterval) {
+      obstacleTimer = 0;
+      spawnObstacle();
+
+      // alle ~20s Spawns etwas dichter
+      if (obstacleInterval > 0.5 && elapsedTime % 20 < dt) {
+        obstacleInterval -= 0.05;
+      }
+    }
+
+    for (const o of obstacles) {
+      o.y += speed * dt;
+    }
+
+    // Offscreen-Obstacles entfernen
+    while (obstacles.length && obstacles[0].y > height + 60) {
+      obstacles.shift();
+    }
+
+    // Kollisionen
+    if (invulTime > 0) {
+      invulTime -= dt;
+    }
+
+    if (invulTime <= 0) {
+      const playerRect = getPlayerRect();
+      for (const o of obstacles) {
+        const oRect = getObstacleRect(o);
+        if (rectsOverlap(playerRect, oRect)) {
+          lives -= 1;
+          invulTime = 1.2; // 1.2s unverwundbar
+          if (lives <= 0) {
+            gameOver();
+          }
+          break;
+        }
+      }
+    }
+
+    updateHUD();
+  }
+
+  function draw() {
+    // Hintergrund
+    ctx.fillStyle = "#020515";
+    ctx.fillRect(0, 0, width, height);
+
+    // Lanes
+    for (let i = 0; i < laneCount; i++) {
+      const x = lanePositions[i] - laneWidth / 2;
+      const laneColor = i === 1 ? "#141d36" : "#0c1427";
+      ctx.fillStyle = laneColor;
+      ctx.fillRect(x, 40, laneWidth, height - 80);
+
+      // Mittellinie
+      ctx.strokeStyle = "rgba(120, 153, 255, 0.15)";
+      ctx.setLineDash([10, 16]);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(lanePositions[i], 50);
+      ctx.lineTo(lanePositions[i], height - 50);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Obstacles
+    for (const o of obstacles) {
+      const r = getObstacleRect(o);
+      ctx.fillStyle = "#e5ecff";
+      ctx.fillRect(r.x, r.y, r.width, r.height);
+      ctx.fillStyle = "#9aa3c2";
+      ctx.fillRect(r.x + 6, r.y + 10, r.width - 12, r.height - 20);
+    }
+
+    // Player
+    const p = getPlayerRect();
+    const char = CHARACTERS[currentCharacterIndex];
+
+    if (!(invulTime > 0 && Math.floor(invulTime * 10) % 2 === 0)) {
+      // Körper
+      ctx.fillStyle = char.bodyColor;
+      ctx.fillRect(p.x, p.y, p.width, p.height);
+
+      // Kopf
+      ctx.fillStyle = char.accentColor;
+      const headH = p.height * 0.28;
+      ctx.fillRect(
+        p.x + p.width * 0.2,
+        p.y - headH + 8,
+        p.width * 0.6,
+        headH
+      );
+
+      // Bauchstreifen
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(
+        p.x + p.width * 0.2,
+        p.y + p.height * 0.35,
+        p.width * 0.6,
+        10
+      );
+      ctx.globalAlpha = 1;
+    }
+
+    // Glow unter dem Player
+    const gradient = ctx.createRadialGradient(
+      p.x + p.width / 2,
+      p.y + p.height,
+      10,
+      p.x + p.width / 2,
+      p.y + p.height + 40,
+      80
+    );
+    gradient.addColorStop(0, "rgba(0, 209, 255, 0.7)");
+    gradient.addColorStop(1, "rgba(0, 209, 255, 0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(
+      p.x + p.width / 2,
+      p.y + p.height + 30,
+      60,
+      20,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+  }
+
+  function loop(timestamp) {
+    if (!lastTime) lastTime = timestamp;
+    const dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+
+    if (running) {
+      update(dt);
+    }
+
+    draw();
+    requestAnimationFrame(loop);
   }
 
   function startGame() {
-    if (!scene || !renderer || typeof THREE === "undefined") {
-      console.error("Game kann nicht starten – Three.js nicht initialisiert.");
-      return;
-    }
-    resetGame();
-    running = true;
-    lastTime = performance.now();
-    if (startScreen) startScreen.classList.add("hidden");
-  }
-
-  function onHit() {
-    lives--;
-    if (lives <= 0) {
-      lives = 0;
-      gameOver();
-    }
-    updateHUD();
+    startScreen.classList.add("hidden");
+    gameOverScreen.classList.add("hidden");
+    resetGameState();
   }
 
   function gameOver() {
     running = false;
-    if (startScreen) {
-      startScreen.classList.remove("hidden");
-      const title = startScreen.querySelector("h1");
-      if (title) title.textContent = "Game Over";
-      const p = startScreen.querySelector("p");
-      if (p) {
-        p.textContent = `Du hast ${Math.floor(
-          score
-        )} Punkte erreicht. Nochmal?`;
-      }
-      if (startButton) startButton.textContent = "Nochmal spielen";
+    finalScoreEl.textContent = Math.floor(score);
+    gameOverScreen.classList.remove("hidden");
+  }
+
+  // ---- Input ---------------------------------------------------
+
+  function handleKeyDown(event) {
+    const key = event.key;
+    if (key === "ArrowLeft" || key === "a" || key === "A") {
+      if (laneIndex > 0) laneIndex -= 1;
+    } else if (key === "ArrowRight" || key === "d" || key === "D") {
+      if (laneIndex < laneCount - 1) laneIndex += 1;
+    } else if (key === " " || key === "Enter") {
+      if (!running) startGame();
     }
   }
 
-  // ---------- Haupt-Loop ----------
-  function startLoop() {
-    if (loopStarted) return;
-    loopStarted = true;
-    requestAnimationFrame(loop);
-  }
+  document.addEventListener("keydown", handleKeyDown);
 
-  function loop(now) {
-    const dt = (now - lastTime) / 1000;
-    lastTime = now;
-
-    if (running) {
-      elapsed += dt;
-      if (Math.random() < dt / 0.9) {
-        spawnObstacle();
-      }
-      updateObstacles(dt);
-      updateHUD();
-    }
-
-    if (renderer && scene && camera) {
-      renderer.render(scene, camera);
-    }
-
-    requestAnimationFrame(loop);
-  }
-
-  // ---------- UI / Events ----------
-  function initUI() {
-    if (startButton) {
-      startButton.addEventListener("click", () => {
-        startGame();
-      });
-    }
-
-    characterButtons.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const idx = parseInt(btn.dataset.character || "0", 10) || 0;
-        setCharacter(idx);
-      });
+  // Charakter-Buttons
+  charButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      charButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const idx = Number(btn.dataset.character);
+      if (!Number.isNaN(idx)) currentCharacterIndex = idx;
     });
+  });
 
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") {
-        moveLeft();
-      } else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") {
-        moveRight();
-      }
-    });
+  // Buttons
+  startBtn.addEventListener("click", startGame);
+  restartBtn.addEventListener("click", startGame);
 
-    // Default-Charakter aktivieren
-    setCharacter(currentCharacter);
-  }
-
-  // ---------- Start direkt nach Laden von main.js ----------
-  init();
-})();
+  // Startzustand
+  updateHUD();
+  requestAnimationFrame(loop);
+});
