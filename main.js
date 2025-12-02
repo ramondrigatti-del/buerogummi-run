@@ -111,7 +111,13 @@ function buildCorridor() {
 }
 
 function buildPlayer(character) {
-  const group = new THREE.Group();
+  let group = new THREE.Group();
+  // Safety fallback: falls aus irgendeinem Grund keine Group entsteht, ersetze durch Object3D,
+  // damit die nachfolgende Initialisierung nicht abstürzt.
+  if (!(group instanceof THREE.Object3D)) {
+    console.warn('Player group fallback aktiviert');
+    group = new THREE.Object3D();
+  }
   const bodyMat = new THREE.MeshStandardMaterial({ color: character.body });
   const accentMat = new THREE.MeshStandardMaterial({ color: character.accent });
 
@@ -159,6 +165,7 @@ function buildPlayer(character) {
   }
 
   group.position.set(lanePositions[1], 0, 0);
+  group.userData = group.userData || {};
   group.userData.size = { x: 1, y: 2.6, z: 1 };
   return group;
 }
