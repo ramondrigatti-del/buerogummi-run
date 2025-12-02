@@ -1,355 +1,444 @@
-"use strict";
+// main.js – einfache 3D-Version von "Bürogummi Run – Office Dodger"
+// Voraussetzungen in index.html:
+//  - <canvas id="game">
+//  - <span id="score">, <span id="lives">, <span id="time">
+//  - <div id="start-screen"> mit Button id="start-button"
+//  - Charakterbuttons mit data-character="0..3" und Klasse "active" für den aktuellen
 
-// --------------------------------------------------
-// DOM-Elemente
-// --------------------------------------------------
-const canvas = document.getElementById("game");
-const scoreEl = document.getElementById("score");
-const livesEl = document.getElementById("lives");
-const timeEl = document.getElementById("time");
-const startButton = document.getElementById("start-button");
-const startPanel = document.getElementById("start-screen");
-const characterButtons = Array.from(
-  document.querySelectorAll(".character-select button")
-);
-
-// Falls etwas Wichtiges fehlt, melden wir das nur in der Konsole
-if (!canvas) {
-  console.error("Canvas mit id='game' nicht gefunden.");
-}
-if (typeof THREE === "undefined") {
-  console.error("THREE ist nicht definiert. Läuft three.min.js wirklich?");
-}
-
-// --------------------------------------------------
-// Spiel-State
-// --------------------------------------------------
-let scene, camera, renderer;
-let player;
-
-const laneWidth = 1.2;
-const lanesX = [-laneWidth, 0, laneWidth];
-
-const obstacles = [];
-const maxObstacles = 8;
-const obstacleSpeed = 8;       // Einheiten pro Sekunde
-const spawnInterval = 1.1;     // Sekunden
-let spawnTimer = 0;
-
-let laneIndex = 1;             // 0 = links, 1 = mitte, 2 = rechts
-let running = false;
-let score = 0;
-let lives = 3;
-let elapsedTime = 0;
-let lastFrameTime = null;      // für requestAnimationFrame-Delta
-
-// Charaktere
-const CHARACTER_KEYS = ["lernende", "itnerd", "hauswart", "classic"];
-
-const CHARACTERS = {
-  lernende: {
-    bodyColor: 0x4f46e5,
-    accentColor: 0x93c5fd
-  },
-  itnerd: {
-    bodyColor: 0x22c55e,
-    accentColor: 0xa7f3d0
-  },
-  hauswart: {
-    bodyColor: 0xf97316,
-    accentColor: 0xffedd5
-  },
-  classic: {
-    bodyColor: 0x06b6d4,
-    accentColor: 0xe0f2fe
+(function () {
+  // ---- DOM-Elemente ----
+  const canvas = document.getElementById("game");
+  if (!canvas) {
+    console.error("Canvas mit id='game' nicht gefunden.");
+    return;
   }
-};
-
-let currentCharacterKey = "classic";
-
-// --------------------------------------------------
-// Initialisierung Three.js
-// --------------------------------------------------
-function initThree() {
-  if (!canvas || scene) return; // schon initialisiert oder kein Canvas
-
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020617);
-  scene.fog = new THREE.Fog(0x020617, 5, 35);
-
-  const aspect = canvas.clientWidth / canvas.clientHeight;
-  camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 50);
-  camera.position.set(0, 3, 7);
-  camera.lookAt(0, 1.2, -5);
-
-  renderer = new THREE.WebGLRenderer({
-    canvas: canvas,
-    antialias: true
-  });
-
-  if (typeof renderer.setPixelRatio === "function") {
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-  }
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-
-  // Licht – nur Standard-Sachen, die in allen Versionen existieren
-  const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambient);
-
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(5, 8, 5);
-  scene.add(dir);
-
-  buildFloor();
-
-  player = buildPlayerMesh(currentCharacterKey);
-  scene.add(player);
-
-  window.addEventListener("resize", onWindowResize);
-}
-
-// Boden / Gang
-function buildFloor() {
-  const floorGeom = new THREE.PlaneGeometry(10, 60);
-  const floorMat = new THREE.MeshPhongMaterial({
-    color: 0x020617,
-    shininess: 0
-  });
-  const floor = new THREE.Mesh(floorGeom, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.z = -20;
-  scene.add(floor);
-}
-
-// Spieler-Mesh
-function buildPlayerMesh(characterKey) {
-  const cfg = CHARACTERS[characterKey] || CHARACTERS.classic;
-  const group = new THREE.Group();
-
-  // Körper
-  const bodyGeom = new THREE.BoxGeometry(0.9, 1.6, 0.8);
-  const bodyMat = new THREE.MeshPhongMaterial({ color: cfg.bodyColor });
-  const body = new THREE.Mesh(bodyGeom, bodyMat);
-  body.position.y = 0.8;
-  group.add(body);
-
-  // Kopf
-  const headGeom = new THREE.BoxGeometry(0.6, 0.6, 0.6);
-  const headMat = new THREE.MeshPhongMaterial({ color: cfg.accentColor });
-  const head = new THREE.Mesh(headGeom, headMat);
-  head.position.y = 1.5;
-  group.add(head);
-
-  // kleine Akzent-Fläche vorne
-  const badgeGeom = new THREE.BoxGeometry(0.3, 0.25, 0.05);
-  const badgeMat = new THREE.MeshPhongMaterial({ color: cfg.accentColor });
-  const badge = new THREE.Mesh(badgeGeom, badgeMat);
-  badge.position.set(0, 1.1, 0.43);
-  group.add(badge);
-
-  group.position.set(lanesX[laneIndex], 0, 0);
-  group.userData.radius = 0.55;
-
-  return group;
-}
-
-// --------------------------------------------------
-// Hindernisse
-// --------------------------------------------------
-const OBSTACLE_TYPES = [
-  { color: 0x9ca3af, w: 0.9, h: 0.7, d: 0.3 }, // Bildschirm
-  { color: 0xfbbf24, w: 0.7, h: 0.4, d: 0.7 }, // Papierstapel
-  { color: 0x10b981, w: 0.5, h: 0.9, d: 0.5 }, // Pflanze
-  { color: 0xef4444, w: 0.5, h: 0.5, d: 0.5 }  // roter Bürogummi ;)
-];
-
-function spawnObstacle() {
-  if (obstacles.length >= maxObstacles) return;
-
-  const lane = Math.floor(Math.random() * 3);
-  const type = OBSTACLE_TYPES[Math.floor(Math.random() * OBSTACLE_TYPES.length)];
-
-  const geom = new THREE.BoxGeometry(type.w, type.h, type.d);
-  const mat = new THREE.MeshPhongMaterial({ color: type.color });
-  const mesh = new THREE.Mesh(geom, mat);
-
-  mesh.position.set(lanesX[lane], type.h / 2, -30);
-  mesh.userData.radius = Math.max(type.w, type.d) * 0.6;
-
-  scene.add(mesh);
-  obstacles.push(mesh);
-}
-
-// --------------------------------------------------
-// Game-Loop & Logik
-// --------------------------------------------------
-function updateGame(dt) {
-  elapsedTime += dt;
-  spawnTimer += dt;
-
-  if (spawnTimer >= spawnInterval) {
-    spawnTimer = 0;
-    spawnObstacle();
+  if (typeof THREE === "undefined") {
+    console.error("THREE (three.min.js) ist nicht geladen.");
+    return;
   }
 
-  const playerRadius = player ? player.userData.radius || 0.6 : 0.6;
+  const scoreEl = document.getElementById("score");
+  const livesEl = document.getElementById("lives");
+  const timeEl = document.getElementById("time");
+  const hintEl = document.getElementById("hint");
 
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    const ob = obstacles[i];
-    ob.position.z += obstacleSpeed * dt;
+  const startPanel = document.getElementById("start-screen");
+  const startButton = document.getElementById("start-button");
+
+  const characterButtons = document.querySelectorAll("[data-character]");
+
+  // ---- Spiel-Status ----
+  let scene, camera, renderer;
+  let player = null;
+
+  const laneWidth = 1.6;
+  const laneX = [-laneWidth, 0, laneWidth]; // x-Positionen der 3 Spuren
+  let laneIndex = 1; // 0 = links, 1 = mitte, 2 = rechts
+
+  let obstacles = [];
+  const obstacleSpeed = 11; // Bewegungsgeschwindigkeit der Hindernisse
+  let spawnTimer = 0;
+
+  let running = false;
+  let score = 0;
+  let lives = 3;
+  let elapsedTime = 0;
+  let lastTime = performance.now();
+  let loopStarted = false;
+
+  // ---- Charaktere (Farben usw.) ----
+  // data-character="0" .. "3" mappen auf diese Einträge
+  const CHARACTERS = [
+    {
+      key: "leni",
+      bodyColor: 0x38bdf8, // helles blau
+      accentColor: 0xffffff
+    },
+    {
+      key: "nico",
+      bodyColor: 0xfacc15, // gelb
+      accentColor: 0x111827
+    },
+    {
+      key: "sam",
+      bodyColor: 0x4ade80, // grün
+      accentColor: 0x064e3b
+    },
+    {
+      key: "keller",
+      bodyColor: 0x60a5fa, // klassischer bürogummi
+      accentColor: 0x1e3a8a
+    }
+  ];
+
+  let currentCharacterIndex = 3; // Start: klassischer Bürogummi
+
+  // =====================================================================
+  // Initialisierung
+  // =====================================================================
+
+  function init() {
+    initThree();
+    initUI();
+    updateHud();
+    startMainLoop();
+  }
+
+  function initThree() {
+    // Szene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x020617); // sehr dunkles Blau
+
+    // Kamera
+    const aspect = canvas.clientWidth / canvas.clientHeight;
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+    camera.position.set(0, 2.5, 6);
+    camera.lookAt(new THREE.Vector3(0, 1.0, -10));
+    scene.add(camera);
+
+    // Sehr einfaches Licht (nur Ambient, damit es überall gleich hell ist)
+    const ambient = new THREE.AmbientLight(0xffffff, 1.0);
+    scene.add(ambient);
+
+    // Renderer
+    renderer = new THREE.WebGLRenderer({
+      canvas: canvas,
+      antialias: true
+    });
+    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    if (renderer.setPixelRatio) {
+      renderer.setPixelRatio(window.devicePixelRatio || 1);
+    }
+
+    // Spielfeld / Korridor
+    buildCorridor();
+
+    // Spieler erstellen
+    rebuildPlayer();
+  }
+
+  function buildCorridor() {
+    // Boden – langer Streifen nach hinten
+    const floorGeo = new THREE.BoxGeometry(6, 0.1, 60);
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0x0b1120 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.set(0, -1, -20);
+    scene.add(floor);
+
+    // Seitliche Wände (optisch, nicht für Kollision)
+    const wallGeo = new THREE.BoxGeometry(0.2, 3, 60);
+    const wallMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
+    const wallLeft = new THREE.Mesh(wallGeo, wallMat);
+    wallLeft.position.set(-3, 0.5, -20);
+    scene.add(wallLeft);
+    const wallRight = new THREE.Mesh(wallGeo, wallMat);
+    wallRight.position.set(3, 0.5, -20);
+    scene.add(wallRight);
+
+    // Markierungen für die 3 Spuren
+    const stripeGeo = new THREE.BoxGeometry(0.05, 0.01, 60);
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0x1f2937 });
+
+    const stripeLeft = new THREE.Mesh(stripeGeo, stripeMat);
+    stripeLeft.position.set(-laneWidth, -0.95, -20);
+    scene.add(stripeLeft);
+
+    const stripeRight = new THREE.Mesh(stripeGeo, stripeMat);
+    stripeRight.position.set(laneWidth, -0.95, -20);
+    scene.add(stripeRight);
+  }
+
+  // =====================================================================
+  // Spieler & Charaktere
+  // =====================================================================
+
+  function rebuildPlayer() {
+    if (!scene) return;
 
     if (player) {
-      const dx = ob.position.x - player.position.x;
-      const dz = ob.position.z - player.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      const obRadius = ob.userData.radius || 0.6;
+      scene.remove(player);
+      player = null;
+    }
 
-      if (dist < playerRadius + obRadius) {
-        // Kollision
-        scene.remove(ob);
+    const cfg =
+      CHARACTERS[currentCharacterIndex] || CHARACTERS[CHARACTERS.length - 1];
+
+    const group = new THREE.Group();
+
+    // Körper
+    const bodyGeo = new THREE.BoxGeometry(0.9, 1.2, 0.6);
+    const bodyMat = new THREE.MeshBasicMaterial({ color: cfg.bodyColor });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.set(0, 0.6, 0);
+    group.add(body);
+
+    // Kopf
+    const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    const headMat = new THREE.MeshBasicMaterial({ color: cfg.accentColor });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.set(0, 1.25, 0);
+    group.add(head);
+
+    // Kleine "Schreibtisch"-Fläche als Base
+    const baseGeo = new THREE.BoxGeometry(1.1, 0.1, 0.8);
+    const baseMat = new THREE.MeshBasicMaterial({ color: 0x0ea5e9 });
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.set(0, -0.05, 0);
+    group.add(base);
+
+    group.position.set(laneX[laneIndex], 0, 0);
+    player = group;
+    scene.add(player);
+  }
+
+  function setActiveCharacter(index) {
+    if (index < 0 || index >= CHARACTERS.length) return;
+    currentCharacterIndex = index;
+
+    // Button-Styles
+    characterButtons.forEach((btn) => btn.classList.remove("active"));
+    const btn = document.querySelector(
+      `[data-character="${String(index)}"]`
+    );
+    if (btn) {
+      btn.classList.add("active");
+    }
+
+    rebuildPlayer();
+  }
+
+  function movePlayerLeft() {
+    if (laneIndex > 0) {
+      laneIndex -= 1;
+      updatePlayerPosition();
+    }
+  }
+
+  function movePlayerRight() {
+    if (laneIndex < 2) {
+      laneIndex += 1;
+      updatePlayerPosition();
+    }
+  }
+
+  function updatePlayerPosition() {
+    if (player) {
+      player.position.x = laneX[laneIndex];
+    }
+  }
+
+  // =====================================================================
+  // Hindernisse
+  // =====================================================================
+
+  function spawnObstacle() {
+    if (!scene) return;
+
+    const lane = Math.floor(Math.random() * 3); // 0..2
+    const w = 0.9;
+    const h = 0.8;
+    const d = 0.8;
+
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9ca3af });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    mesh.position.set(laneX[lane], -0.6, -40); // weit vorne
+    scene.add(mesh);
+
+    obstacles.push({
+      mesh,
+      lane
+    });
+  }
+
+  function updateObstacles(delta) {
+    const speed = obstacleSpeed;
+
+    spawnTimer -= delta;
+    if (spawnTimer <= 0) {
+      spawnObstacle();
+      spawnTimer = 1.1 + Math.random() * 0.6; // Zeit bis zum nächsten Spawn
+    }
+
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const o = obstacles[i];
+      o.mesh.position.z += speed * delta;
+
+      // zu weit hinten -> weg
+      if (o.mesh.position.z > 5) {
+        scene.remove(o.mesh);
         obstacles.splice(i, 1);
-        lives -= 1;
-        if (lives <= 0) {
-          lives = 0;
-          gameOver();
-          return;
-        }
         continue;
       }
+
+      // einfache Kollision
+      if (checkCollision(o.mesh)) {
+        scene.remove(o.mesh);
+        obstacles.splice(i, 1);
+        onHitObstacle();
+      }
     }
+  }
 
-    // Vorbei gelaufen -> Punkte
-    if (ob.position.z > 5) {
-      scene.remove(ob);
-      obstacles.splice(i, 1);
-      score += 10;
+  function checkCollision(obMesh) {
+    if (!player) return false;
+
+    const dx = Math.abs(obMesh.position.x - player.position.x);
+    const dz = Math.abs(obMesh.position.z - player.position.z);
+
+    return dx < laneWidth * 0.5 && dz < 0.8;
+  }
+
+  function onHitObstacle() {
+    lives -= 1;
+    if (lives < 0) lives = 0;
+    updateHud();
+
+    if (lives <= 0) {
+      gameOver();
     }
   }
 
-  updateScoreboard();
-}
-
-function animate(timestamp) {
-  if (!running) return;
-
-  requestAnimationFrame(animate);
-
-  if (lastFrameTime === null) {
-    lastFrameTime = timestamp;
-  }
-  const dt = Math.min((timestamp - lastFrameTime) / 1000, 0.05);
-  lastFrameTime = timestamp;
-
-  updateGame(dt);
-  if (renderer && scene && camera) {
-    renderer.render(scene, camera);
-  }
-}
-
-// --------------------------------------------------
-// UI / Steuerung
-// --------------------------------------------------
-function updateScoreboard() {
-  if (scoreEl) scoreEl.textContent = String(Math.floor(score));
-  if (livesEl) livesEl.textContent = String(lives);
-  if (timeEl) timeEl.textContent = `${Math.floor(elapsedTime)}s`;
-}
-
-function resetGameState() {
-  laneIndex = 1;
-  score = 0;
-  lives = 3;
-  elapsedTime = 0;
-  spawnTimer = 0;
-  lastFrameTime = null;
-
-  // Hindernisse entfernen
-  for (const ob of obstacles) {
-    if (scene) scene.remove(ob);
-  }
-  obstacles.length = 0;
-
-  // Spieler neu bauen
-  if (scene) {
-    if (player) scene.remove(player);
-    player = buildPlayerMesh(currentCharacterKey);
-    scene.add(player);
-  }
-
-  updateScoreboard();
-}
-
-function startGame() {
-  if (running) return;
-  initThree();
-  resetGameState();
-  if (startPanel) startPanel.classList.add("hidden");
-  running = true;
-  requestAnimationFrame(animate);
-}
-
-function gameOver() {
-  running = false;
-  if (startPanel) startPanel.classList.remove("hidden");
-}
-
-function moveLane(dir) {
-  if (!player) return;
-  laneIndex += dir;
-  if (laneIndex < 0) laneIndex = 0;
-  if (laneIndex > 2) laneIndex = 2;
-  player.position.x = lanesX[laneIndex];
-}
-
-function onKeyDown(e) {
-  if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") {
-    moveLane(-1);
-  } else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") {
-    moveLane(1);
-  } else if (e.key === "Enter" && !running) {
-    startGame();
-  }
-}
-
-function onWindowResize() {
-  if (!renderer || !camera || !canvas) return;
-  const aspect = canvas.clientWidth / canvas.clientHeight;
-  camera.aspect = aspect;
-  camera.updateProjectionMatrix();
-  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-}
-
-// Charakterauswahl
-function updateCharacterSelection() {
-  characterButtons.forEach((btn, index) => {
-    const key = CHARACTER_KEYS[index];
-    const active = key === currentCharacterKey;
-    btn.classList.toggle("active", active);
-  });
-
-  if (scene) {
-    if (player) scene.remove(player);
-    player = buildPlayerMesh(currentCharacterKey);
-    scene.add(player);
-  }
-}
-
-// --------------------------------------------------
-// Setup beim Laden
-// --------------------------------------------------
-function setupUI() {
-  if (startButton) startButton.addEventListener("click", startGame);
-  window.addEventListener("keydown", onKeyDown);
-
-  characterButtons.forEach((btn, index) => {
-    btn.addEventListener("click", () => {
-      currentCharacterKey = CHARACTER_KEYS[index] || "classic";
-      updateCharacterSelection();
+  function clearObstacles() {
+    obstacles.forEach((o) => {
+      scene.remove(o.mesh);
     });
-  });
+    obstacles = [];
+  }
 
-  updateScoreboard();
-}
+  // =====================================================================
+  // HUD & Game State
+  // =====================================================================
 
-// direkt beim Laden aufrufen (Script steht am Ende von index.html)
-setupUI();
+  function updateHud() {
+    if (scoreEl) scoreEl.textContent = String(Math.floor(score));
+    if (livesEl) livesEl.textContent = String(lives);
+    if (timeEl) timeEl.textContent = `${Math.floor(elapsedTime)}s`;
+    if (hintEl && hintEl.textContent.trim() === "") {
+      hintEl.textContent = "Steuerung: A / D oder ← / →";
+    }
+  }
+
+  function resetGameState() {
+    score = 0;
+    lives = 3;
+    elapsedTime = 0;
+    laneIndex = 1;
+    updatePlayerPosition();
+    clearObstacles();
+    spawnTimer = 0;
+    updateHud();
+    lastTime = performance.now();
+  }
+
+  function startGame() {
+    if (!scene) {
+      initThree();
+    }
+
+    resetGameState();
+    running = true;
+
+    if (startPanel) {
+      startPanel.classList.add("hidden");
+    }
+  }
+
+  function gameOver() {
+    running = false;
+
+    if (startPanel) {
+      startPanel.classList.remove("hidden");
+      // Optional: Text anpassen, falls du im Overlay Elemente dafür hast
+      const title = startPanel.querySelector("h2, h1");
+      if (title) {
+        title.textContent = "Game Over";
+      }
+      const para = startPanel.querySelector("p");
+      if (para) {
+        para.textContent = `Du hast ${Math.floor(
+          score
+        )} Punkte erreicht. Versuch's gleich nochmal!`;
+      }
+      if (startButton) {
+        startButton.textContent = "Nochmal spielen";
+      }
+    }
+  }
+
+  // =====================================================================
+  // Animations-Loop
+  // =====================================================================
+
+  function startMainLoop() {
+    if (loopStarted) return;
+    loopStarted = true;
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function loop(now) {
+    const delta = (now - lastTime) / 1000; // Sekunden
+    lastTime = now;
+
+    if (running) {
+      elapsedTime += delta;
+      score += delta * 60; // Punkte / Sekunde
+      updateObstacles(delta);
+      updateHud();
+    }
+
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // =====================================================================
+  // UI / Input
+  // =====================================================================
+
+  function initUI() {
+    // Startbutton
+    if (startButton) {
+      startButton.addEventListener("click", function () {
+        startGame();
+      });
+    }
+
+    // Charakter-Buttons
+    characterButtons.forEach((btn) => {
+      btn.addEventListener("click", function () {
+        const idx = parseInt(btn.dataset.character || "0", 10) || 0;
+        setActiveCharacter(idx);
+      });
+    });
+
+    // Keyboard
+    window.addEventListener("keydown", function (e) {
+      if (!running) return;
+
+      if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") {
+        movePlayerLeft();
+      } else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") {
+        movePlayerRight();
+      }
+    });
+
+    // Start: aktiven Button erkennen
+    const activeBtn = document.querySelector("[data-character].active");
+    if (activeBtn) {
+      const idx = parseInt(activeBtn.dataset.character || "3", 10) || 3;
+      currentCharacterIndex = idx;
+    }
+    setActiveCharacter(currentCharacterIndex);
+  }
+
+  // =====================================================================
+  // Start, sobald DOM & Scripts geladen sind
+  // =====================================================================
+
+  window.addEventListener("load", init);
+})();
