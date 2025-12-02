@@ -1,25 +1,15 @@
 "use strict";
 
-// ---------- DOM-Elemente ----------
-
-const canvas = document.getElementById("game");
-const scoreEl = document.getElementById("score");
-const livesEl = document.getElementById("lives");
-const timeEl = document.getElementById("time");
-const startBtn = document.getElementById("start-button");
-const startPanel = document.querySelector(".panel");
-const characterButtons = document.querySelectorAll(".character-select button");
-
-// ---------- Three.js Basis ----------
+// ---------- Globale Variablen für das Spiel ----------
 
 let scene, camera, renderer;
 let player;
-let laneIndex = 1; // 0 = links, 1 = mitte, 2 = rechts
-const laneWidth = 1.2;
+let laneIndex = 1; // 0 = links, 1 = Mitte, 2 = rechts
+const laneWidth = 1.3;
 const laneX = [-laneWidth, 0, laneWidth];
 
 const obstacles = [];
-const maxObstacles = 8;
+const maxObstacles = 7;
 
 let running = false;
 let clock;
@@ -27,39 +17,63 @@ let elapsedTime = 0;
 let score = 0;
 let lives = 3;
 
-// Charakter-Konfiguration (Farben usw.)
-const CHARACTERS = {
-  "0": { name: "Leni", bodyColor: 0x4ade80, accentColor: 0x22c55e },
-  "1": { name: "Nico", bodyColor: 0x38bdf8, accentColor: 0x0ea5e9 },
-  "2": { name: "Sam", bodyColor: 0xf97316, accentColor: 0xfdba74 },
-  "3": { name: "Keller", bodyColor: 0xa855f7, accentColor: 0xc4b5fd }
-};
+// DOM-Elemente
+const scoreEl = document.getElementById("score");
+const livesEl = document.getElementById("lives");
+const timeEl = document.getElementById("time");
+const startPanel =
+  document.getElementById("start-panel") || document.querySelector(".panel");
+const startButton = document.getElementById("start-button");
+const characterButtons = document.querySelectorAll(".character-select button");
 
-let currentCharacter = "0";
+// Charakter-Definitionen (Farben etc.)
+const CHARACTERS = [
+  // 0 – Lernende Verwaltung
+  { body: 0x38bdf8, accent: 0xffffff },
+  // 1 – IT-Nerd
+  { body: 0x8b5cf6, accent: 0x22c55e },
+  // 2 – Hauswart
+  { body: 0x22c55e, accent: 0xf97316 },
+  // 3 – Klassischer Bürogummi
+  { body: 0x0ea5e9, accent: 0xfacc15 }
+];
 
-// ---------- Setup ----------
+let currentCharacterIndex = [...characterButtons].findIndex(btn =>
+  btn.classList.contains("active")
+);
+if (currentCharacterIndex < 0) currentCharacterIndex = 0;
+
+// ---------- Three.js Grundaufbau ----------
 
 function initThree() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x020617); // sehr dunkles Blau
+  const canvas = document.getElementById("game");
+  if (!canvas) {
+    console.error("Canvas mit id='game' nicht gefunden.");
+    return;
+  }
 
-  // Kamera
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x020617);
+
   const aspect = canvas.clientWidth / canvas.clientHeight;
-  camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 100);
-  camera.position.set(0, 2.2, 4.5);
-  camera.lookAt(0, 1.4, -5);
+  camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+  camera.position.set(0, 2.3, 6);
+  camera.lookAt(0, 1.3, 0);
   scene.add(camera);
 
-  // Renderer nutzt das bestehende Canvas
   renderer = new THREE.WebGLRenderer({
     canvas: canvas,
     antialias: true
   });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
+
+  // Ältere three.js-Versionen kennen setPixelRatio evtl. noch nicht
+  if (renderer.setPixelRatio) {
+    renderer.setPixelRatio(window.devicePixelRatio || 1);
+  }
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
 
   // Licht
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x020617, 1.0);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x020617, 0.9);
   scene.add(hemi);
 
   const dir = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -69,195 +83,191 @@ function initThree() {
   // Boden / Gang
   buildCorridor();
 
-  // Spieler
-  player = buildPlayerMesh();
+  // Spielerfigur
+  player = buildPlayerMesh(currentCharacterIndex);
   scene.add(player);
 
-  // Hindernisse
-  createInitialObstacles();
-
-  // Clock
   clock = new THREE.Clock();
+  updateHUD();
 }
 
 function buildCorridor() {
-  const floorGeo = new THREE.PlaneGeometry(6, 60);
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x02091a,
-    roughness: 0.8,
-    metalness: 0.1
-  });
-
+  // Boden
+  const floorGeo = new THREE.PlaneGeometry(8, 40);
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x020b1f });
   const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.z = -20;
-  floor.receiveShadow = true;
+  floor.position.z = -10;
   scene.add(floor);
 
-  // seitliche Wände, damit der Gang sichtbarer ist
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: 0x020817,
-    roughness: 0.6
-  });
+  // Lane-Linien
+  const lineGeo = new THREE.PlaneGeometry(0.04, 40);
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+  const lineLeft = new THREE.Mesh(lineGeo, lineMat);
+  lineLeft.rotation.x = -Math.PI / 2;
+  lineLeft.position.set(-laneWidth, 0.001, -10);
+  scene.add(lineLeft);
 
-  const wallGeo = new THREE.BoxGeometry(0.2, 2.4, 10);
-
-  for (let i = 0; i < 6; i++) {
-    // linke Wand
-    const wallLeft = new THREE.Mesh(wallGeo, wallMat);
-    wallLeft.position.set(-laneWidth * 2, 1.2, -i * 10 - 5);
-    scene.add(wallLeft);
-
-    // rechte Wand
-    const wallRight = new THREE.Mesh(wallGeo, wallMat.clone());
-    wallRight.position.set(laneWidth * 2, 1.2, -i * 10 - 5);
-    scene.add(wallRight);
-  }
+  const lineRight = lineLeft.clone();
+  lineRight.position.x = laneWidth;
+  scene.add(lineRight);
 }
 
-// ---------- Spieler ----------
+// ---------- Spieler / Charakter ----------
 
-function buildPlayerMesh() {
-  const cfg = CHARACTERS[currentCharacter] || CHARACTERS["0"];
+function buildPlayerMesh(characterIndex) {
+  const cfg = CHARACTERS[characterIndex] || CHARACTERS[0];
+  const bodyColor = cfg.body;
+  const accentColor = cfg.accent;
+
   const group = new THREE.Group();
 
-  // Körper
-  const bodyGeo = new THREE.BoxGeometry(0.9, 1.4, 0.7);
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: cfg.bodyColor,
-    roughness: 0.4,
-    metalness: 0.15
-  });
+  const bodyGeo = new THREE.BoxGeometry(0.9, 1.2, 0.8);
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.9;
+  body.position.y = 0.8;
   group.add(body);
 
-  // Kopf
-  const headGeo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
-  const headMat = new THREE.MeshStandardMaterial({
-    color: 0xf1f5f9
-  });
+  const headGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
   const head = new THREE.Mesh(headGeo, headMat);
-  head.position.y = 1.5;
+  head.position.y = 1.4;
   group.add(head);
 
-  // kleines Namensbadge
-  const badgeGeo = new THREE.BoxGeometry(0.35, 0.15, 0.05);
-  const badgeMat = new THREE.MeshStandardMaterial({
-    color: cfg.accentColor
-  });
+  const badgeGeo = new THREE.BoxGeometry(0.25, 0.25, 0.05);
+  const badgeMat = new THREE.MeshStandardMaterial({ color: accentColor });
   const badge = new THREE.Mesh(badgeGeo, badgeMat);
-  badge.position.set(0, 1.2, 0.35);
+  badge.position.set(0, 0.95, 0.43);
   group.add(badge);
 
   group.position.set(laneX[laneIndex], 0, 0);
 
+  // einfache Bounding-Box für Kollision
+  group.userData.size = { x: 0.9, y: 1.6, z: 0.8 };
+
   return group;
 }
 
-function rebuildPlayer() {
-  if (player && scene) {
-    scene.remove(player);
-  }
-  player = buildPlayerMesh();
-  if (scene) {
-    scene.add(player);
+function setLane(newIndex) {
+  laneIndex = Math.max(0, Math.min(2, newIndex));
+  if (player) {
+    player.position.x = laneX[laneIndex];
   }
 }
 
 // ---------- Hindernisse ----------
 
 const obstacleTypes = [
-  { key: "chair", color: 0x7c3aed, size: { w: 1.1, h: 1.4, d: 1.1 } },
-  { key: "monitor", color: 0x38bdf8, size: { w: 0.9, h: 1.1, d: 0.4 } },
-  { key: "folder", color: 0xfacc15, size: { w: 0.9, h: 1.0, d: 0.4 } },
-  { key: "paper", color: 0x22c55e, size: { w: 1.2, h: 0.4, d: 0.35 } },
-  { key: "eraser", color: 0xf97316, size: { w: 1.1, h: 0.55, d: 0.7 } }
+  { key: "chair", color: 0x7c3aed, size: [1.0, 1.1, 1.0] },
+  { key: "monitor", color: 0x38bdf8, size: [0.9, 0.7, 0.3] },
+  { key: "paper", color: 0xe2e8f0, size: [1.2, 0.12, 0.9] },
+  { key: "eraser", color: 0xf97316, size: [0.7, 0.35, 0.4] }
 ];
 
-function buildObstacleMesh(typeCfg) {
-  const { w, h, d } = typeCfg.size;
+function buildObstacleMesh(typeIndex) {
+  const cfg = obstacleTypes[typeIndex] || obstacleTypes[0];
+  const [w, h, d] = cfg.size;
   const geo = new THREE.BoxGeometry(w, h, d);
-  const mat = new THREE.MeshStandardMaterial({
-    color: typeCfg.color,
-    roughness: 0.6
-  });
+  const mat = new THREE.MeshStandardMaterial({ color: cfg.color });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
+  mesh.userData.size = { x: w, y: h, z: d };
+  mesh.userData.type = cfg.key;
   return mesh;
 }
 
-function createInitialObstacles() {
-  obstacles.length = 0;
+function spawnObstacle() {
+  if (!scene) return;
+  if (obstacles.length >= maxObstacles) return;
 
-  for (let i = 0; i < maxObstacles; i++) {
-    const typeCfg =
-      obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
-    const mesh = buildObstacleMesh(typeCfg);
-    scene.add(mesh);
+  const lane = Math.floor(Math.random() * 3); // 0,1,2
+  const typeIndex = Math.floor(Math.random() * obstacleTypes.length);
+  const mesh = buildObstacleMesh(typeIndex);
 
-    const lane = Math.floor(Math.random() * 3);
-    const zPos = -10 - i * 6;
+  mesh.position.set(laneX[lane], 0.5, -20); // weit vorne im Gang
+  scene.add(mesh);
 
-    mesh.position.set(laneX[lane], typeCfg.size.h / 2, zPos);
+  obstacles.push({
+    mesh,
+    lane,
+    speed: 8 + Math.random() * 4
+  });
+}
 
-    obstacles.push({
-      mesh,
-      type: typeCfg,
-      lane,
-      speed: 6 + Math.random() * 3
-    });
+function updateObstacles(delta) {
+  if (!player) return;
+
+  const playerSize = player.userData.size || { x: 1, y: 1.6, z: 1 };
+  const playerPos = player.position;
+
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.mesh.position.z += o.speed * delta; // Richtung Kamera
+
+    // raus, wenn an Kamera vorbei
+    if (o.mesh.position.z > 6) {
+      scene.remove(o.mesh);
+      obstacles.splice(i, 1);
+      continue;
+    }
+
+    // einfache AABB-Kollision
+    const os = o.mesh.userData.size || { x: 1, y: 1, z: 1 };
+    const dx = Math.abs(o.mesh.position.x - playerPos.x);
+    const dz = Math.abs(o.mesh.position.z - playerPos.z);
+
+    if (
+      dx < (playerSize.x + os.x) * 0.5 &&
+      dz < (playerSize.z + os.z) * 0.5
+    ) {
+      handleHit(i);
+    }
+  }
+
+  // neue Hindernisse zufällig spawnen
+  if (Math.random() < delta * 1.8) {
+    spawnObstacle();
   }
 }
 
-function resetObstacle(ob) {
-  const lane = Math.floor(Math.random() * 3);
-  const zPos = -50 - Math.random() * 40;
+function handleHit(index) {
+  const o = obstacles[index];
+  scene.remove(o.mesh);
+  obstacles.splice(index, 1);
 
-  ob.lane = lane;
-  ob.mesh.position.set(laneX[lane], ob.type.size.h / 2, zPos);
-  ob.speed = 6 + Math.random() * 3;
+  lives -= 1;
+  if (lives <= 0) {
+    lives = 0;
+    updateHUD();
+    gameOver();
+  } else {
+    updateHUD();
+  }
 }
 
-// ---------- Game-Logik ----------
+// ---------- HUD & Game-State ----------
+
+function updateHUD() {
+  if (scoreEl) scoreEl.textContent = Math.floor(score);
+  if (livesEl) livesEl.textContent = lives;
+  if (timeEl) timeEl.textContent = `${Math.floor(elapsedTime)}s`;
+}
 
 function resetGameState() {
-  score = 0;
-  lives = 3;
-  elapsedTime = 0;
+  // Hindernisse entfernen
+  for (const o of obstacles) {
+    scene.remove(o.mesh);
+  }
+  obstacles.length = 0;
+
   laneIndex = 1;
-
-  updateHUD();
-
   if (player) {
     player.position.set(laneX[laneIndex], 0, 0);
   }
 
-  if (scene) {
-    createInitialObstacles();
-  }
-}
-
-function updateHUD() {
-  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`;
-  if (livesEl) livesEl.textContent = `Leben: ${lives}`;
-  if (timeEl) timeEl.textContent = `Zeit: ${Math.floor(elapsedTime)}s`;
-}
-
-function startGame() {
-  if (!scene) {
-    initThree();
-  }
-
-  resetGameState();
-
-  running = true;
-  if (startPanel) {
-    startPanel.classList.add("hidden");
-  }
-
-  clock.getDelta(); // reset
-  animate();
+  score = 0;
+  lives = 3;
+  elapsedTime = 0;
+  updateHUD();
 }
 
 function gameOver() {
@@ -266,137 +276,94 @@ function gameOver() {
   if (startPanel) {
     startPanel.classList.remove("hidden");
   }
-
-  alert(
-    `Game Over!\n\nScore: ${Math.floor(
-      score
-    )}\nZeit: ${Math.floor(elapsedTime)} Sekunden\n\nTipp: Weich den Hindernissen früher aus, um länger zu überleben.`
-  );
 }
+
+// ---------- Game-Loop ----------
 
 function animate() {
   if (!running) return;
 
   requestAnimationFrame(animate);
 
-  const delta = clock.getDelta();
+  const delta = clock ? clock.getDelta() : 0.016;
   elapsedTime += delta;
-  score += delta * 15;
+  score += delta * 20;
 
+  updateObstacles(delta);
   updateHUD();
-  updateWorld(delta);
 
   renderer.render(scene, camera);
 }
 
-function updateWorld(delta) {
-  if (!player) return;
-
-  obstacles.forEach((ob) => {
-    ob.mesh.position.z += ob.speed * delta;
-
-    // ausser Sicht -> nach vorne setzen
-    if (ob.mesh.position.z > 4) {
-      resetObstacle(ob);
-    }
-
-    // sehr einfache Kollision: gleiche Spur + z-Distanz klein
-    const sameLane = ob.lane === laneIndex;
-    const dz = Math.abs(ob.mesh.position.z - player.position.z);
-
-    if (sameLane && dz < 0.9) {
-      handleHit(ob);
-    }
-  });
-}
-
-let hitCooldown = 0;
-
-function handleHit(obstacle) {
-  // einfache Cooldown, damit man nicht in einem Frame alle Leben verliert
-  const now = performance.now();
-  if (now - hitCooldown < 700) return;
-  hitCooldown = now;
-
-  lives -= 1;
-  updateHUD();
-
-  // kleines optisches Feedback
-  if (player) {
-    player.position.y += 0.15;
-    setTimeout(() => {
-      if (player) player.position.y -= 0.15;
-    }, 120);
+function startGame() {
+  if (!scene) {
+    initThree();
   }
 
-  resetObstacle(obstacle);
+  resetGameState();
+  running = true;
 
-  if (lives <= 0) {
-    gameOver();
+  if (startPanel) {
+    startPanel.classList.add("hidden");
   }
+
+  if (clock) {
+    clock.getDelta(); // ersten grossen Delta-Sprung verhindern
+  }
+
+  animate();
 }
 
-// ---------- Eingaben ----------
+// ---------- Input / Events ----------
 
-function handleKeyDown(e) {
+// Tastatursteuerung
+window.addEventListener("keydown", event => {
   if (!running) return;
 
-  if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") {
-    laneIndex = Math.max(0, laneIndex - 1);
-    if (player) {
-      player.position.x = laneX[laneIndex];
-    }
-  } else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") {
-    laneIndex = Math.min(2, laneIndex + 1);
-    if (player) {
-      player.position.x = laneX[laneIndex];
-    }
+  switch (event.key) {
+    case "a":
+    case "A":
+    case "ArrowLeft":
+      setLane(laneIndex - 1);
+      break;
+    case "d":
+    case "D":
+    case "ArrowRight":
+      setLane(laneIndex + 1);
+      break;
   }
+});
+
+// Start-Button
+if (startButton) {
+  startButton.addEventListener("click", () => {
+    startGame();
+  });
 }
 
 // Charakter-Buttons
-
-function handleCharacterClick(e) {
-  const btn = e.currentTarget;
-  const id = btn.getAttribute("data-character");
-  if (!id) return;
-
-  currentCharacter = id;
-  // aktive Klasse updaten
-  characterButtons.forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-
-  rebuildPlayer();
-}
-
-// ---------- Initialisierung ----------
-
-function setupUI() {
-  if (startBtn) {
-    startBtn.addEventListener("click", () => {
-      startGame();
-    });
-  }
-
-  window.addEventListener("keydown", handleKeyDown);
-
-  characterButtons.forEach((btn) => {
-    btn.addEventListener("click", handleCharacterClick);
-  });
-
-  // Standard-Charakter aktiv markieren
-  characterButtons.forEach((btn) => {
-    if (btn.getAttribute("data-character") === currentCharacter) {
+if (characterButtons.length) {
+  characterButtons.forEach((btn, index) => {
+    btn.addEventListener("click", () => {
+      characterButtons.forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-    }
-  });
+      currentCharacterIndex = index;
 
-  // Anfangswerte im HUD
-  updateHUD();
+      if (scene) {
+        if (player) {
+          scene.remove(player);
+        }
+        player = buildPlayerMesh(currentCharacterIndex);
+        scene.add(player);
+      }
+    });
+  });
 }
 
+// Szene direkt beim Laden vorbereiten,
+// damit man die Figur schon hinter dem Start-Panel sieht.
 window.addEventListener("load", () => {
-  // Drei.js-Setup erst, wenn wir das Spiel wirklich starten,
-  // damit der Startscreen schneller lädt.
-  setupUI();
+  if (!scene) {
+    initThree();
+  }
 });
