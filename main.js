@@ -249,10 +249,16 @@ function resetGame() {
 
 function startGame() {
   if (!ensureScene()) return;
-  startScreenEl.classList.add('hidden');
-  overlayEl.classList.add('hidden');
+  startScreenEl?.classList.add('hidden');
+  overlayEl?.classList.add('hidden');
   resetGame();
   playing = true;
+  // Falls die Animationsschleife aus irgendeinem Grund noch nicht läuft (z. B. init vorher fehlgeschlagen), jetzt starten.
+  if (!loopStarted && clock) {
+    loopStarted = true;
+    clock.start();
+    requestAnimationFrame(animate);
+  }
 }
 
 function triggerGameOver() {
@@ -347,6 +353,13 @@ function update(delta) {
 }
 
 function animate() {
+  if (!clock || !renderer || !camera || !scene) {
+    // Versuche fehlende Szene nachzuliefern (z. B. falls init beim Laden scheiterte)
+    ensureScene();
+    requestAnimationFrame(animate);
+    return;
+  }
+
   const delta = clock.getDelta();
   update(delta);
   renderer.render(scene, camera);
@@ -455,15 +468,15 @@ function initDom() {
 
   setupCharacterButtons();
   bindInput();
-  startBtn.addEventListener('click', startGame);
-  restartBtn.addEventListener('click', startGame);
+  if (startBtn) startBtn.addEventListener('click', startGame);
+  if (restartBtn) restartBtn.addEventListener('click', startGame);
   window.addEventListener('resize', resize);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   initDom();
   ensureScene();
-  if (!loopStarted) {
+  if (!loopStarted && clock) {
     loopStarted = true;
     animate();
   }
