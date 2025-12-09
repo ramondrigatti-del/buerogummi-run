@@ -32,7 +32,15 @@
   var tmpObstacleBox = new THREE.Box3();
 
   var scoreDisplay = document.getElementById('score');
-  var gameOverDisplay = document.getElementById('gameOver');
+  var gameOverOverlay = document.getElementById('overlay');
+  var startScreen = document.getElementById('start-screen');
+  var startButton = document.getElementById('start-button');
+  var restartButton = document.getElementById('restart');
+  var finalScoreDisplay = document.getElementById('final-score');
+  var finalTimeDisplay = document.getElementById('final-time');
+
+  var gameStarted = false;
+  var gameStartTime = 0;
 
   function updateScoreUI() {
     if (scoreDisplay) {
@@ -40,10 +48,29 @@
     }
   }
 
+  function updateTimeUI() {
+    var timeSpan = document.getElementById('time');
+    if (timeSpan && gameStarted) {
+      var elapsed = Math.floor((Date.now() - gameStartTime) / 1000);
+      timeSpan.textContent = 'Zeit: ' + elapsed + 's';
+      if (isGameOver && finalTimeDisplay) {
+        finalTimeDisplay.textContent = 'Zeit: ' + elapsed + 's';
+      }
+    }
+  }
+
   function setGameOverUI(show) {
-    if (gameOverDisplay) {
-      // Safari versteht hidden = true/false
-      gameOverDisplay.hidden = !show;
+    if (gameOverOverlay) {
+      gameOverOverlay.classList.toggle('hidden', !show);
+      if (show && finalScoreDisplay) {
+        finalScoreDisplay.textContent = 'Score: ' + score;
+      }
+    }
+  }
+
+  function showStartScreen(show) {
+    if (startScreen) {
+      startScreen.classList.toggle('hidden', !show);
     }
   }
 
@@ -444,8 +471,9 @@
     requestAnimationFrame(animate);
 
     var delta = clock.getDelta();
-    if (!isGameOver) {
+    if (gameStarted && !isGameOver) {
       update(delta);
+      updateTimeUI();
     }
 
     renderer.render(scene, camera);
@@ -482,10 +510,47 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Event Listeners
+  // ---------------------------------------------------------------------------
+
+  function startGame() {
+    gameStarted = true;
+    gameStartTime = Date.now();
+    showStartScreen(false);
+    setGameOverUI(false);
+  }
+
+  if (startButton) {
+    startButton.addEventListener('click', startGame);
+  }
+
+  if (restartButton) {
+    restartButton.addEventListener('click', function () {
+      resetGame();
+      startGame();
+    });
+  }
+
+  // Character selection (changes appearance for next game)
+  var characterButtons = document.querySelectorAll('.character-select button');
+  for (var cb = 0; cb < characterButtons.length; cb++) {
+    characterButtons[cb].addEventListener('click', function (e) {
+      // Remove active class from all buttons
+      for (var i = 0; i < characterButtons.length; i++) {
+        characterButtons[i].classList.remove('active');
+      }
+      // Add active class to clicked button
+      e.target.classList.add('active');
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------------------
 
   initScene();
+  showStartScreen(true);
+  setGameOverUI(false);
   animate();
 
 })();
